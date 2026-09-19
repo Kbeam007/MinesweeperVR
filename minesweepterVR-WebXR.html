@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Graph Minesweeper VR - Meta Quest</title>
+    <style>
+        :root {
+            --neon-green: #00ff66;
+            --neon-glow: 0 0 10px rgba(0, 255, 102, 0.6);
+            --bg-dark: rgba(5, 15, 8, 0.88);
+        }
+        * { box-sizing: border-box; user-select: none; margin: 0; padding: 0; }
+        body { background-color: #000; overflow: hidden; font-family: 'Courier New', monospace; color: var(--neon-green); }
+        #webgl-canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; display: block; z-index: 1; }
+        .ui-layer { position: absolute; z-index: 10; pointer-events: none; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 16px; }
+        .interactive { pointer-events: auto; }
+        header, footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+        .hud-box { background: var(--bg-dark); border: 2px solid var(--neon-green); box-shadow: var(--neon-glow); border-radius: 8px; padding: 10px 16px; font-size: 14px; text-transform: uppercase; }
+        .btn { background: #000; color: var(--neon-green); border: 2px solid var(--neon-green); box-shadow: var(--neon-glow); padding: 8px 14px; font-family: inherit; font-size: 13px; font-weight: bold; border-radius: 6px; cursor: pointer; text-transform: uppercase; }
+        .btn:hover { background: var(--neon-green); color: #000; }
+        .btn.active { background: var(--neon-green); color: #000; }
+    </style>
+
+    <!-- Three.js and WebXR Addons -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <canvas id="webgl-canvas"></canvas>
+    
+    <div class="ui-layer">
+        <header>
+            <div class="hud-box interactive">
+                Mines: <span id="hud-mines">0</span> | Nodes: <span id="hud-nodes">0</span> | Mode: <span id="hud-mode">Reveal</span>
+            </div>
+            <div class="hud-box interactive">
+                <button class="btn" id="btn-desktop-reset">Reset</button>
+                <button class="btn" id="btn-desktop-toggle-flag">🚩 Flag Mode</button>
+            </div>
+        </header>
+        <footer>
+            <div class="hud-box interactive" style="font-size: 12px;">
+                <b>VR Controls:</b> Index Trigger = Reveal | Grip = Move/Rotate World | Hands = Touch Nodes Directly
+            </div>
+        </footer>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+        import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+
+        /* -------------------------------------------------------------
+           1. Audio Synthesizer (Web Audio API)
+        ------------------------------------------------------------- */
+        class SoundFX {
+            constructor() { this.ctx = null; }
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                }
+                if (this.ctx.state === 'suspended') this.ctx.resume();
+            }
+            playTone(freq, type = 'sine', dur = 0.1, gainVal = 0.1) {
+                try {
+                    this.init();
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + dur);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + dur);
+                } catch(e) {}
+            }
+            click() { this.playTone(800, 'sine', 0.05, 0.08); }
+            reveal() { this.playTone(520, 'triangle', 0.12, 0.12); }
+            flag() { this.playTone(320, 'square', 0.08, 0.06); }
+            win() { [440, 554, 659, 880].forEach((f, i) => setTimeout(() => this.playTone(f, 'sine', 0.25, 0.15), i * 110)); }
+            explode() {
+                try {
+                    this.init();
+                    const bufferSize = this.ctx.sampleRate * 0.4;
+                    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+                    const noise = this.ctx.createBufferSource();
+                    noise.buffer = buffer;
+                    const filter = this.ctx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.setValueAtTime(400, this.ctx.currentTime);
+                    filter.frequency.linearRampToValueAtTime(50, this.ctx.currentTime + 0.4);
+                    const gain = this.ctx.createGain();
+                    gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
+                    noise.connect(filter); filter.connect(gain); gain.connect(this.ctx.destination);
+                    noise.start();
+                } catch(e) {}
+            }
+        }
+        const sfx = new SoundFX();
+
+        /* -------------------------------------------------------------
+           2. Visual Constants & Number Texture Generation
+        ------------------------------------------------------------- */
+        const COLORS = {
+            NODE_UNREVEALED: 0x555555,
+            NODE_REVEALED: 0x0044ff,
+            NODE_HINT: 0xe5dc1a,
+            NODE_FLAG: 0xff1111,
+            NODE_MINE: 0xff0022,
+            LINK_DEFAULT: 0x2e3d30,
+            LINK_SAFE: 0x0055ff,
+            LINK_MINE: 0xff1111
+        };
+
+        const NODE_RADIUS = 0.08;
+
+        function createNumberSprite(number, color = '#ffffff') {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.clearRect(0, 0, 128, 128);
+            ctx.fillStyle = color;
+            ctx.font = 'bold 88px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(number.toString(), 64, 64);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.minFilter = THREE.LinearFilter;
+
+            // depthTest enabled for real 3D occlusion behind other spheres
+            // depthWrite disabled so transparent quad doesn't clip background elements
+            const mat = new THREE.SpriteMaterial({
+                map: tex,
+                depthTest: true,
+                depthWrite: false,
+                transparent: true
+            });
+
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(NODE_RADIUS * 1.5, NODE_RADIUS * 1.5, 1);
+            return sprite;
+        }
+
+        /* -------------------------------------------------------------
+           3. Game Engine & WebXR System
+        ------------------------------------------------------------- */
+        class MinesweeperVR {
+            constructor() {
+                this.nodes = [];
+                this.links = [];
+                this.inGame = true;
+                this.firstClick = true;
+                this.flagMode = false;
+                this.totalMines = 8;
+                this.hoveredNode = null;
+
+                // Manipulation tracking
+                this.grabbedBy = [];
+                this.previousControllerMatrix = new THREE.Matrix4();
+
+                // Reusable vectors for zero GC overhead during render loop
+                this.camPos = new THREE.Vector3();
+                this.localDir = new THREE.Vector3();
+
+                this.initGraphics();
+                this.initWebXR();
+                this.initDesktopControls();
+                this.createSpatialHUD();
+                this.startNewGame();
+            }
+
+            initGraphics() {
+                this.canvas = document.getElementById('webgl-canvas');
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x050a06);
+
+                this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 100);
+                this.camera.position.set(0, 1.4, 0.8);
+
+                this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.renderer.xr.enabled = true;
+                document.body.appendChild(VRButton.createButton(this.renderer));
+
+                this.scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+                const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+                dirLight.position.set(5, 10, 7);
+                this.scene.add(dirLight);
+
+                this.worldAnchor = new THREE.Group();
+                this.worldAnchor.position.set(0, 1.2, -0.6);
+                this.scene.add(this.worldAnchor);
+
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                });
+            }
+
+            initWebXR() {
+                this.controllerModelFactory = new XRControllerModelFactory();
+                this.handModelFactory = new XRHandModelFactory();
+                this.controllers = [];
+                this.hands = [];
+
+                this.raycaster = new THREE.Raycaster();
+                this.workingMatrix = new THREE.Matrix4();
+                this.tempVec = new THREE.Vector3();
+
+                for (let i = 0; i < 2; i++) {
+                    const controller = this.renderer.xr.getController(i);
+                    this.scene.add(controller);
+
+                    const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1.5)]);
+                    const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff66, transparent: true, opacity: 0.5 });
+                    const laser = new THREE.Line(lineGeo, lineMat);
+                    laser.name = 'laser';
+                    controller.add(laser);
+
+                    const grip = this.renderer.xr.getControllerGrip(i);
+                    grip.add(this.controllerModelFactory.createControllerModel(grip));
+                    this.scene.add(grip);
+
+                    const hand = this.renderer.xr.getHand(i);
+                    hand.add(this.handModelFactory.createHandModel(hand, "mesh"));
+                    this.scene.add(hand);
+
+                    controller.addEventListener('selectstart', () => this.onXRTriggerDown(controller));
+                    controller.addEventListener('squeezestart', () => this.onXRGripStart(controller));
+                    controller.addEventListener('squeezeend', () => this.onXRGripEnd(controller));
+
+                    this.controllers.push(controller);
+                    this.hands.push(hand);
+                }
+            }
+
+            createSpatialHUD() {
+                this.hudCanvas = document.createElement('canvas');
+                this.hudCanvas.width = 512; this.hudCanvas.height = 128;
+                this.hudCtx = this.hudCanvas.getContext('2d');
+
+                this.hudTexture = new THREE.CanvasTexture(this.hudCanvas);
+                const hudGeo = new THREE.PlaneGeometry(0.6, 0.15);
+                const hudMat = new THREE.MeshBasicMaterial({ map: this.hudTexture, transparent: true });
+
+                this.hudMesh = new THREE.Mesh(hudGeo, hudMat);
+                this.hudMesh.position.set(0, 0.45, 0);
+                this.worldAnchor.add(this.hudMesh);
+                this.updateHUD();
+            }
+
+            updateHUD() {
+                let remaining = this.totalMines;
+                let unrevealed = 0;
+                for (let n of this.nodes) {
+                    if (n.isFlagged) remaining--;
+                    if (!n.isRevealed) unrevealed++;
+                }
+
+                document.getElementById('hud-mines').textContent = Math.max(0, remaining);
+                document.getElementById('hud-nodes').textContent = unrevealed;
+                document.getElementById('hud-mode').textContent = this.flagMode ? '🚩 Flagging' : '⛏️ Revealing';
+
+                this.hudCtx.fillStyle = 'rgba(5, 20, 10, 0.85)';
+                this.hudCtx.fillRect(0, 0, 512, 128);
+                this.hudCtx.strokeStyle = '#00ff66';
+                this.hudCtx.lineWidth = 6;
+                this.hudCtx.strokeRect(4, 4, 504, 120);
+
+                this.hudCtx.fillStyle = '#00ff66';
+                this.hudCtx.font = 'bold 36px monospace';
+                this.hudCtx.textAlign = 'center';
+                this.hudCtx.fillText(`MINES: ${Math.max(0, remaining)}  |  LEFT: ${unrevealed}`, 256, 50);
+
+                this.hudCtx.font = '26px monospace';
+                this.hudCtx.fillStyle = this.flagMode ? '#ff3333' : '#88ffaa';
+                this.hudCtx.fillText(`MODE: ${this.flagMode ? 'FLAGGING [🚩]' : 'REVEAL [⛏️]'}`, 256, 95);
+
+                this.hudTexture.needsUpdate = true;
+            }
+
+            buildNetwork(count = 32) {
+                while (this.worldAnchor.children.length > 0) {
+                    const obj = this.worldAnchor.children[0];
+                    if (obj === this.hudMesh) {
+                        this.worldAnchor.remove(obj);
+                    } else {
+                        this.worldAnchor.remove(obj);
+                        if (obj.geometry) obj.geometry.dispose();
+                    }
+                }
+                this.worldAnchor.add(this.hudMesh);
+                this.nodes = [];
+                this.links = [];
+
+                const sphereGeo = new THREE.SphereGeometry(NODE_RADIUS, 24, 24);
+                
+                // polygonOffset pushes the sphere depth slightly back, ensuring the front-facing numbers
+                // never get depth-clipped by their own sphere, while still occluding correctly against other spheres!
+                const baseNodeMat = new THREE.MeshStandardMaterial({
+                    color: COLORS.NODE_UNREVEALED,
+                    roughness: 0.3,
+                    metalness: 0.1,
+                    polygonOffset: true,
+                    polygonOffsetFactor: 1,
+                    polygonOffsetUnits: 1
+                });
+
+                const spread = 0.45;
+                for (let i = 0; i < count; i++) {
+                    let pos, valid;
+                    let tries = 0;
+                    do {
+                        valid = true;
+                        pos = new THREE.Vector3(
+                            (Math.random() - 0.5) * 2 * spread,
+                            (Math.random() - 0.5) * 2 * spread,
+                            (Math.random() - 0.5) * 2 * spread
+                        );
+                        for (let n of this.nodes) {
+                            if (pos.distanceTo(n.pos) < NODE_RADIUS * 3.5) { valid = false; break; }
+                        }
+                        tries++;
+                    } while (!valid && tries < 100);
+
+                    const mesh = new THREE.Mesh(sphereGeo, baseNodeMat.clone());
+                    mesh.position.copy(pos);
+                    mesh.userData = { nodeId: i };
+                    this.worldAnchor.add(mesh);
+
+                    this.nodes.push({
+                        id: i, pos, mesh, sprite: null, neighbors: [], links: [],
+                        isMine: false, isRevealed: false, isFlagged: false, isHinted: false, adjMines: 0
+                    });
+                }
+
+                const linkMat = new THREE.MeshStandardMaterial({ color: COLORS.LINK_DEFAULT, roughness: 0.5 });
+                const maxConnectDist = spread * 0.75;
+                for (let i = 0; i < this.nodes.length; i++) {
+                    for (let j = i + 1; j < this.nodes.length; j++) {
+                        const dist = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
+                        if (dist < maxConnectDist && this.nodes[i].neighbors.length < 4 && this.nodes[j].neighbors.length < 4) {
+                            this.addConnection(i, j, linkMat);
+                        }
+                    }
+                    if (this.nodes[i].neighbors.length === 0) {
+                        let nearest = -1, minD = Infinity;
+                        for (let j = 0; j < this.nodes.length; j++) {
+                            if (i === j) continue;
+                            const d = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
+                            if (d < minD) { minD = d; nearest = j; }
+                        }
+                        if (nearest !== -1) this.addConnection(i, nearest, linkMat);
+                    }
+                }
+            }
+
+            addConnection(a, b, mat) {
+                const p1 = this.nodes[a].pos;
+                const p2 = this.nodes[b].pos;
+                const dir = new THREE.Vector3().subVectors(p2, p1);
+                const len = dir.length();
+
+                const geom = new THREE.CylinderGeometry(0.008, 0.008, len, 6);
+                geom.translate(0, len / 2, 0);
+                geom.rotateX(Math.PI / 2);
+
+                const mesh = new THREE.Mesh(geom, mat.clone());
+                mesh.position.copy(p1);
+                mesh.lookAt(p2);
+                this.worldAnchor.add(mesh);
+
+                const linkId = this.links.length;
+                this.links.push({ id: linkId, a, b, mesh });
+                this.nodes[a].neighbors.push(b);
+                this.nodes[a].links.push(linkId);
+                this.nodes[b].neighbors.push(a);
+                this.nodes[b].links.push(linkId);
+            }
+
+            plantMines(startNodeId) {
+                let planted = 0;
+                while (planted < this.totalMines) {
+                    const idx = Math.floor(Math.random() * this.nodes.length);
+                    if (idx === startNodeId || this.nodes[startNodeId].neighbors.includes(idx)) continue;
+                    if (!this.nodes[idx].isMine) {
+                        this.nodes[idx].isMine = true;
+                        planted++;
+                    }
+                }
+                for (let n of this.nodes) {
+                    n.adjMines = n.neighbors.filter(nb => this.nodes[nb].isMine).length;
+                }
+            }
+
+            revealNode(id) {
+                const node = this.nodes[id];
+                if (!this.inGame || node.isRevealed || node.isFlagged) return;
+
+                if (this.firstClick) {
+                    this.firstClick = false;
+                    this.plantMines(id);
+                }
+
+                if (node.isMine) {
+                    this.inGame = false;
+                    sfx.explode();
+                    node.mesh.material.color.setHex(COLORS.NODE_MINE);
+                    this.revealBoardOnLoss();
+                    return;
+                }
+
+                node.isRevealed = true;
+                node.mesh.material.color.setHex(COLORS.NODE_REVEALED);
+                sfx.reveal();
+
+                this.attachNumberSprite(node, '#ffffff');
+
+                for (let nbId of node.neighbors) {
+                    const nb = this.nodes[nbId];
+                    if (!nb.isRevealed && !nb.isFlagged) {
+                        nb.isHinted = true;
+                        nb.mesh.material.color.setHex(COLORS.NODE_HINT);
+                        this.attachNumberSprite(nb, '#000000');
+                    }
+                }
+
+                if (node.adjMines === 0) {
+                    for (let nb of node.neighbors) {
+                        if (!this.nodes[nb].isRevealed) this.revealNode(nb);
+                    }
+                }
+
+                this.updateHUD();
+                this.checkWin();
+            }
+
+            toggleFlag(id) {
+                const node = this.nodes[id];
+                if (!this.inGame || node.isRevealed) return;
+
+                node.isFlagged = !node.isFlagged;
+                if (node.isFlagged) {
+                    sfx.flag();
+                    node.mesh.material.color.setHex(COLORS.NODE_FLAG);
+                    if (node.sprite) node.sprite.visible = false;
+                } else {
+                    sfx.reveal();
+                    node.mesh.material.color.setHex(node.isHinted ? COLORS.NODE_HINT : COLORS.NODE_UNREVEALED);
+                    if (node.sprite) node.sprite.visible = true;
+                }
+                this.updateHUD();
+                this.checkWin();
+            }
+
+            attachNumberSprite(node, color) {
+                if (node.sprite) node.mesh.remove(node.sprite);
+                const sprite = createNumberSprite(node.adjMines, color);
+                node.mesh.add(sprite);
+                node.sprite = sprite;
+                
+                // Immediately orient to face camera
+                this.orientSprite(node);
+            }
+
+            orientSprite(node) {
+                if (!node.sprite || !node.sprite.visible) return;
+                this.camera.getWorldPosition(this.camPos);
+
+                // Transform the camera's world position directly into this specific node's local coordinate space
+                this.localDir.copy(this.camPos);
+                node.mesh.worldToLocal(this.localDir);
+
+                // Normalize and place directly on the outer surface toward the player
+                this.localDir.normalize().multiplyScalar(NODE_RADIUS + 0.008);
+                node.sprite.position.copy(this.localDir);
+            }
+
+            updateAllSprites() {
+                for (let i = 0; i < this.nodes.length; i++) {
+                    this.orientSprite(this.nodes[i]);
+                }
+            }
+
+            revealBoardOnLoss() {
+                for (let n of this.nodes) {
+                    if (n.isMine) n.mesh.material.color.setHex(COLORS.NODE_MINE);
+                    else {
+                        n.mesh.material.color.setHex(COLORS.NODE_REVEALED);
+                        this.attachNumberSprite(n, '#ffffff');
+                    }
+                }
+            }
+
+            checkWin() {
+                let correctFlags = 0;
+                let safeRevealed = 0;
+                for (let n of this.nodes) {
+                    if (n.isFlagged && n.isMine) correctFlags++;
+                    if (n.isRevealed && !n.isMine) safeRevealed++;
+                }
+                if (safeRevealed === this.nodes.length - this.totalMines || correctFlags === this.totalMines) {
+                    this.inGame = false;
+                    sfx.win();
+                }
+            }
+
+            onXRTriggerDown(controller) {
+                this.triggerHaptic(controller, 0.7, 40);
+                if (this.hoveredNode) {
+                    if (this.flagMode) this.toggleFlag(this.hoveredNode.id);
+                    else this.revealNode(this.hoveredNode.id);
+                }
+            }
+
+            onXRGripStart(controller) {
+                this.grabbedBy.push(controller);
+                this.previousControllerMatrix.copy(controller.matrixWorld);
+            }
+
+            onXRGripEnd(controller) {
+                this.grabbedBy = this.grabbedBy.filter(c => c !== controller);
+            }
+
+            triggerHaptic(controller, intensity = 0.5, duration = 30) {
+                const gamepad = controller.userData?.gamepad;
+                if (gamepad && gamepad.hapticActuators && gamepad.hapticActuators[0]) {
+                    gamepad.hapticActuators[0].pulse(intensity, duration);
+                }
+            }
+
+            handleVRInteractions() {
+                let foundHover = null;
+                const nodeMeshes = this.nodes.map(n => n.mesh);
+
+                for (let controller of this.controllers) {
+                    this.workingMatrix.identity().extractRotation(controller.matrixWorld);
+                    this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+                    this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.workingMatrix);
+
+                    const hits = this.raycaster.intersectObjects(nodeMeshes);
+                    if (hits.length > 0) {
+                        foundHover = this.nodes[hits[0].object.userData.nodeId];
+                        const laser = controller.getObjectByName('laser');
+                        if (laser) laser.scale.z = hits[0].distance;
+                        break;
+                    } else {
+                        const laser = controller.getObjectByName('laser');
+                        if (laser) laser.scale.z = 1.5;
+                    }
+                }
+
+                // Direct Hand-Tracking Poke Detection
+                for (let hand of this.hands) {
+                    if (hand.joints) {
+                        const indexTip = hand.joints['index-finger-tip'];
+                        if (indexTip) {
+                            const tipPos = this.tempVec.setFromMatrixPosition(indexTip.matrixWorld);
+                            for (let n of this.nodes) {
+                                const nWorld = n.mesh.getWorldPosition(new THREE.Vector3());
+                                if (tipPos.distanceTo(nWorld) < NODE_RADIUS * 1.3) {
+                                    foundHover = n;
+                                    if (!n.isRevealed && !n.isFlagged) {
+                                        this.revealNode(n.id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (this.hoveredNode !== foundHover) {
+                    if (this.hoveredNode) this.hoveredNode.mesh.scale.set(1, 1, 1);
+                    this.hoveredNode = foundHover;
+                    if (this.hoveredNode) {
+                        this.hoveredNode.mesh.scale.set(1.3, 1.3, 1.3);
+                        this.triggerHaptic(this.controllers[0], 0.2, 15);
+                    }
+                }
+
+                // 6DoF World Manipulation via Grip Drag
+                if (this.grabbedBy.length === 1) {
+                    const c = this.grabbedBy[0];
+                    const delta = new THREE.Matrix4().copy(c.matrixWorld).multiply(this.previousControllerMatrix.invert());
+                    this.worldAnchor.applyMatrix4(delta);
+                    this.previousControllerMatrix.copy(c.matrixWorld);
+                }
+            }
+
+            initDesktopControls() {
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.target.copy(this.worldAnchor.position);
+                this.controls.enableDamping = true;
+
+                const mouse = new THREE.Vector2();
+                const dRay = new THREE.Raycaster();
+
+                window.addEventListener('pointerup', (e) => {
+                    if (this.renderer.xr.isPresenting) return;
+                    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+                    dRay.setFromCamera(mouse, this.camera);
+                    const hits = dRay.intersectObjects(this.nodes.map(n => n.mesh));
+                    if (hits.length > 0) {
+                        const id = hits[0].object.userData.nodeId;
+                        if (e.button === 2 || this.flagMode) this.toggleFlag(id);
+                        else this.revealNode(id);
+                    }
+                });
+
+                document.getElementById('btn-desktop-toggle-flag').onclick = () => {
+                    this.flagMode = !this.flagMode;
+                    document.getElementById('btn-desktop-toggle-flag').classList.toggle('active', this.flagMode);
+                    this.updateHUD();
+                };
+                document.getElementById('btn-desktop-reset').onclick = () => this.startNewGame();
+                window.addEventListener('contextmenu', e => e.preventDefault());
+            }
+
+            startNewGame() {
+                this.firstClick = true;
+                this.inGame = true;
+                this.buildNetwork(32);
+                this.updateHUD();
+            }
+
+            render() {
+                if (this.renderer.xr.isPresenting) {
+                    this.handleVRInteractions();
+                } else {
+                    this.controls.update();
+                }
+
+                // Keep numbers pinned on the outer hull facing the camera
+                this.updateAllSprites();
+
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        /* -------------------------------------------------------------
+           4. Application Bootstrap
+        ------------------------------------------------------------- */
+        window.addEventListener('DOMContentLoaded', () => {
+            const app = new MinesweeperVR();
+            app.renderer.setAnimationLoop(() => {
+                app.render();
+            });
+        });
+    </script>
+</body>
+</html>
