@@ -238,7 +238,7 @@
 
         <footer>
             <div class="hud-box interactive vr-tip">
-                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Thumbstick = Rotate Grid | Grip = Pull Grid (Release has zero-G inertia, click Grip again to brake)
+                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Thumbstick = Rotate Grid | Grip = Pull Grid (Release for linear drift, click Grip again to brake)
             </div>
             <div class="hud-box interactive" style="display:flex; gap: 10px;">
                 <button class="btn active" id="btn-mode-reveal">⛏️ Click: Reveal</button>
@@ -297,7 +297,7 @@
            • <b style="color:#00d0ff;">🔵 RIGHT HAND (BLUE):</b> Open/Reveal nodes (Trigger or poke).<br>
            • <b style="color:#ff4466;">🔴 LEFT HAND (RED):</b> Flag/Mark mines (Trigger or poke).<br>
            • <b>VR Thumbstick:</b> Rotate the whole matrix in place freely.<br>
-           • <b>VR Zero-G Inertia:</b> Squeeze & throw the field with Grip. Release it to float in weightlessness. <b>Click Grip again anytime to brake & stop!</b><br>
+           • <b>VR Grip Glide:</b> Pull and toss the field with Grip. Release it to float in weightless linear inertia. <b>Click Grip again anytime to brake & stop!</b><br>
            • <b>Wrist Menu:</b> Flip your left palm upward anytime to summon the dashboard!
         </p>
         <div class="modal-buttons">
@@ -505,11 +505,10 @@
                     }
                 };
 
-                // Grip & Weightless Inertia state
+                // Grip & Weightless Inertia state (Linear translation only)
                 this.grabbedBy = [];
                 this.previousControllerMatrix = new THREE.Matrix4();
                 this.linearVelocity = new THREE.Vector3();
-                this.angularVelocity = new THREE.Vector3();
                 this.isDrifting = false;
 
                 this.vrUIPage = 'hud';
@@ -904,7 +903,7 @@
                     ctx.font = '15px monospace';
                     ctx.fillStyle = '#88ffaa';
                     ctx.fillText('• THUMBSTICKS: Rotate the entire 3D matrix in place.', 40, 180);
-                    ctx.fillText('• SQUEEZE GRIP: Drag matrix in space. Release to float in weightless inertia!', 40, 208);
+                    ctx.fillText('• SQUEEZE GRIP: Drag matrix in space. Release to glide along weightless linear path!', 40, 208);
                     ctx.fillText('• GRIP CLICK (BRAKE): Click Grip again at any time to instantly freeze matrix.', 40, 236);
                     ctx.fillText('• FLIP LEFT PALM UP: Summons the wrist button to recall this menu.', 40, 264);
 
@@ -1299,7 +1298,6 @@
                 this.graphGroup.rotation.set(0, 0, 0);
 
                 this.linearVelocity.set(0, 0, 0);
-                this.angularVelocity.set(0, 0, 0);
                 this.isDrifting = false;
 
                 const box = new THREE.Box3();
@@ -1667,9 +1665,8 @@
             }
 
             onXRGripStart(controller) {
-                // Instantly brake and freeze any ongoing zero-G inertia drift
+                // Instantly brake and freeze any ongoing inertia drift
                 this.linearVelocity.set(0, 0, 0);
-                this.angularVelocity.set(0, 0, 0);
                 this.isDrifting = false;
 
                 if (!this.grabbedBy.includes(controller)) {
@@ -1682,12 +1679,11 @@
                 this.grabbedBy = this.grabbedBy.filter(c => c !== controller);
                 
                 if (this.grabbedBy.length === 0) {
-                    // Activate weightless inertia if user was moving or flicking
-                    if (this.linearVelocity.length() > 0.02 || this.angularVelocity.length() > 0.04) {
+                    // Activate weightless linear inertia if user was moving or flicking
+                    if (this.linearVelocity.length() > 0.02) {
                         this.isDrifting = true;
                     } else {
                         this.linearVelocity.set(0, 0, 0);
-                        this.angularVelocity.set(0, 0, 0);
                         this.isDrifting = false;
                     }
                 } else {
@@ -1812,9 +1808,6 @@
                     const qTotal = new THREE.Quaternion().multiplyQuaternions(qPitch, qYaw);
                     this.worldAnchor.quaternion.premultiply(qTotal);
                     this.needsSpriteUpdate = true;
-
-                    // Thumbstick activity dampens angular drift
-                    this.angularVelocity.multiplyScalar(0.7);
                 }
 
                 const currentlyHoveredNodeIds = new Set();
@@ -1954,59 +1947,35 @@
                 }
 
                 /* -------------------------------------------------------------
-                   4. Grip Movement & Zero-G Inertia
+                   4. Grip Movement & Zero-G Linear Inertia (No Angular Spin)
                 ------------------------------------------------------------- */
                 if (this.grabbedBy.length === 1) {
                     const c = this.grabbedBy[0];
                     const delta = new THREE.Matrix4().copy(c.matrixWorld).multiply(this.previousControllerMatrix.invert());
                     this.worldAnchor.applyMatrix4(delta);
 
-                    // Compute instantaneous linear velocity
+                    // Compute instantaneous linear velocity only
                     const deltaTrans = new THREE.Vector3().setFromMatrixPosition(delta);
                     const instLinVel = deltaTrans.divideScalar(Math.max(dt, 0.001));
-
-                    // Compute instantaneous angular velocity (axis * angle / dt)
-                    const deltaRot = new THREE.Quaternion().setFromRotationMatrix(delta);
-                    let angle = 2 * Math.acos(Math.min(1, Math.max(-1, deltaRot.w)));
-                    let axis = new THREE.Vector3(deltaRot.x, deltaRot.y, deltaRot.z);
-                    if (axis.lengthSq() > 0.0001) {
-                        axis.normalize();
-                    } else {
-                        axis.set(0, 1, 0);
-                        angle = 0;
-                    }
-                    const instAngVel = axis.multiplyScalar(angle / Math.max(dt, 0.001));
 
                     // Exponential moving average for smooth, weightless release
                     const smoothFactor = 0.42;
                     this.linearVelocity.lerp(instLinVel, smoothFactor);
-                    this.angularVelocity.lerp(instAngVel, smoothFactor);
 
                     this.previousControllerMatrix.copy(c.matrixWorld);
                     this.needsSpriteUpdate = true;
                 } else if (this.isDrifting && this.grabbedBy.length === 0) {
-                    // Weightless glide with slight cosmic drag
+                    // Linear glide with subtle cosmic damping
                     const drag = 0.992;
                     this.linearVelocity.multiplyScalar(drag);
-                    this.angularVelocity.multiplyScalar(drag);
 
-                    // Apply linear glide
+                    // Apply purely translational glide
                     this.worldAnchor.position.addScaledVector(this.linearVelocity, dt);
-
-                    // Apply angular spin
-                    const angSpeed = this.angularVelocity.length();
-                    if (angSpeed > 0.0001) {
-                        const rotAxis = this.angularVelocity.clone().normalize();
-                        const qStep = new THREE.Quaternion().setFromAxisAngle(rotAxis, angSpeed * dt);
-                        this.worldAnchor.quaternion.premultiply(qStep);
-                    }
-
                     this.needsSpriteUpdate = true;
 
                     // Stop when drift speed becomes imperceptible
-                    if (this.linearVelocity.length() < 0.004 && this.angularVelocity.length() < 0.008) {
+                    if (this.linearVelocity.length() < 0.004) {
                         this.linearVelocity.set(0, 0, 0);
-                        this.angularVelocity.set(0, 0, 0);
                         this.isDrifting = false;
                     }
                 }
