@@ -229,6 +229,7 @@
                 <div class="stat-item">Tool: <span id="hud-mode" style="color:#88ffaa;">⛏️ Reveal</span></div>
             </div>
             <div class="hud-box interactive" style="display: flex; gap: 8px;">
+                <button class="btn" id="btn-toggle-spatial-menu">3D Menu: Open</button>
                 <button class="btn" id="btn-gen-mode">Gen Mode</button>
                 <button class="btn" id="btn-difficulty">Difficulty</button>
                 <button class="btn" id="btn-tutorial">Tutorial</button>
@@ -237,7 +238,7 @@
 
         <footer>
             <div class="hud-box interactive vr-tip">
-                <b>VR CONTROLS:</b> Trigger = Reveal/Flag | Squeeze Grip = Move & Rotate Matrix | Index Finger = Direct Poke
+                <b>VR CONTROLS:</b> Trigger = Reveal/Flag | Squeeze Grip = Move & Rotate Matrix | Flip Left Palm Up = Open Menu
             </div>
             <div class="hud-box interactive" style="display:flex; gap: 10px;">
                 <button class="btn active" id="btn-mode-reveal">⛏️ Click: Reveal</button>
@@ -296,7 +297,7 @@
            • <b>Yellow Nodes:</b> Clue nodes showing unrevealed neighboring mine counts.<br>
            • <b>Desktop:</b> Left Click = Reveal, Right Click = Flag, Drag = Orbit.<br>
            • <b>VR:</b> Index Trigger = Reveal/Flag, Squeeze Grip = Move & Rotate Field.<br>
-           • <b>Direct Hand Tracking:</b> Poke any node directly with your index finger!
+           • <b>Wrist Menu:</b> Flip your left palm upward anytime to summon the floating dashboard!
         </p>
         <div class="modal-buttons">
             <button class="btn modal-close">Understood</button>
@@ -391,7 +392,8 @@
             NODE_HINT: 0xe5dc1a,
             NODE_FLAG: 0xff1111,
             NODE_MINE: 0xff0022,
-            LINK_DEFAULT: 0x223328,
+            // Links now initially match the unrevealed gray nodes
+            LINK_DEFAULT: 0x555555,
             LINK_SAFE: 0x0055ff,
             LINK_MINE: 0xff1111
         };
@@ -461,12 +463,15 @@
                 this.flagMode = false;
                 this.hoveredNode = null;
                 this.hoveredVRButton = null;
+                this.hoveredPalmButton = false;
+
+                // Menu visibility & state
+                this.isSpatialMenuOpen = true;
 
                 // 4 Generation algorithms & 4 Difficulty Presets
-                this.genAlgorithm = 'tree'; // 'tree', 'poisson-uniform', 'poisson-seq', 'poisson-biased'
-                this.currentDiff = 'easy';   // 'easy', 'medium', 'hard', 'insane'
+                this.genAlgorithm = 'tree';
+                this.currentDiff = 'easy';
 
-                // Real-world distances scaled 3x for clear separation and visibility
                 this.difficulties = {
                     easy: {
                         mines: 4,
@@ -493,7 +498,7 @@
                 // VR State
                 this.grabbedBy = [];
                 this.previousControllerMatrix = new THREE.Matrix4();
-                this.vrUIPage = 'hud'; // 'hud', 'gen', 'diff', 'tut', 'gameover'
+                this.vrUIPage = 'hud';
                 this.endGameData = { title: 'MISSION FAILED', message: 'Core detonated.', color: '#ff2222' };
 
                 // Pre-allocated GC Math objects
@@ -504,9 +509,18 @@
                 this.workingMatrix = new THREE.Matrix4();
                 this.sharedSphereGeo = new THREE.SphereGeometry(NODE_RADIUS, 20, 20);
 
+                // Palm orientation math
+                this.palmP1 = new THREE.Vector3();
+                this.palmP2 = new THREE.Vector3();
+                this.palmP3 = new THREE.Vector3();
+                this.palmNormal = new THREE.Vector3();
+                this.palmWorldPos = new THREE.Vector3();
+                this.controllerPalmDir = new THREE.Vector3();
+
                 this.initGraphics();
                 this.initWebXR();
                 this.initSpatialPanel();
+                this.initPalmMenuButton();
                 this.init2DUI();
                 this.initDesktopInteraction();
                 this.startNewGame();
@@ -517,7 +531,6 @@
                 this.scene = new THREE.Scene();
                 this.scene.background = new THREE.Color(0x020603);
 
-                // Extended camera distance to frame the 3x larger matrix
                 this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 120);
                 this.camera.position.set(0, 1.45, 2.2);
 
@@ -532,7 +545,6 @@
                 dirLight.position.set(6, 12, 8);
                 this.scene.add(dirLight);
 
-                // Central matrix anchor placed comfortably forward to accommodate 3x graph radius
                 this.worldAnchor = new THREE.Group();
                 this.worldAnchor.position.set(0, 1.25, -0.9);
                 this.scene.add(this.worldAnchor);
@@ -562,7 +574,7 @@
                     const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff66, transparent: true, opacity: 0.6 });
                     const laser = new THREE.Line(lineGeo, lineMat);
                     laser.name = 'laser';
-                    laser.scale.z = 4.5; // Extended default reach for 3x larger matrix
+                    laser.scale.z = 4.5;
                     controller.add(laser);
 
                     const grip = this.renderer.xr.getControllerGrip(i);
@@ -573,8 +585,21 @@
                     hand.add(this.handModelFactory.createHandModel(hand, 'mesh'));
                     this.scene.add(hand);
 
-                    controller.addEventListener('connected', (e) => { controller.userData.gamepad = e.data.gamepad; });
-                    controller.addEventListener('disconnected', () => { controller.userData.gamepad = null; });
+                    controller.addEventListener('connected', (e) => {
+                        controller.userData.gamepad = e.data.gamepad;
+                        controller.userData.handedness = e.data.handedness;
+                    });
+                    controller.addEventListener('disconnected', () => {
+                        controller.userData.gamepad = null;
+                        controller.userData.handedness = null;
+                    });
+
+                    hand.addEventListener('connected', (e) => {
+                        hand.userData.handedness = e.data.handedness;
+                    });
+                    hand.addEventListener('disconnected', () => {
+                        hand.userData.handedness = null;
+                    });
 
                     controller.addEventListener('selectstart', () => this.onXRTriggerDown(controller));
                     controller.addEventListener('squeezestart', () => this.onXRGripStart(controller));
@@ -586,7 +611,7 @@
             }
 
             /* -------------------------------------------------------------
-               4. Interactive 3D Spatial Terminal (In-VR UI Screen)
+               4. Interactive 3D Spatial Terminal & Palm Wrist Menu
             ------------------------------------------------------------- */
             initSpatialPanel() {
                 this.hudCanvas = document.createElement('canvas');
@@ -602,7 +627,6 @@
                 const hudMat = new THREE.MeshBasicMaterial({ map: this.hudTexture, transparent: true, side: THREE.DoubleSide });
 
                 this.hudMesh = new THREE.Mesh(hudGeo, hudMat);
-                // Placed above the expanded 3x matrix to prevent intersection
                 this.hudMesh.position.set(0, 1.15, 0);
                 this.worldAnchor.add(this.hudMesh);
 
@@ -610,9 +634,73 @@
                 this.renderSpatialUI();
             }
 
+            initPalmMenuButton() {
+                this.palmCanvas = document.createElement('canvas');
+                this.palmCanvas.width = 512;
+                this.palmCanvas.height = 160;
+                this.palmCtx = this.palmCanvas.getContext('2d');
+
+                this.palmTexture = new THREE.CanvasTexture(this.palmCanvas);
+                this.palmTexture.minFilter = THREE.LinearFilter;
+                this.palmTexture.generateMipmaps = false;
+
+                this.renderPalmButtonTexture(false);
+
+                const palmGeo = new THREE.PlaneGeometry(0.14, 0.046);
+                const palmMat = new THREE.MeshBasicMaterial({
+                    map: this.palmTexture,
+                    transparent: true,
+                    side: THREE.DoubleSide,
+                    depthTest: false
+                });
+
+                this.palmButtonMesh = new THREE.Mesh(palmGeo, palmMat);
+                this.palmButtonMesh.visible = false;
+                this.palmButtonMesh.renderOrder = 999;
+                this.scene.add(this.palmButtonMesh);
+            }
+
+            renderPalmButtonTexture(isHovered) {
+                const ctx = this.palmCtx;
+                ctx.clearRect(0, 0, 512, 160);
+
+                ctx.fillStyle = isHovered ? 'rgba(0, 255, 102, 0.95)' : 'rgba(2, 20, 10, 0.92)';
+                ctx.strokeStyle = '#00ff66';
+                ctx.lineWidth = 8;
+                ctx.fillRect(8, 8, 496, 144);
+                ctx.strokeRect(8, 8, 496, 144);
+
+                ctx.fillStyle = isHovered ? '#000000' : '#00ff66';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = 'bold 36px monospace';
+                ctx.fillText('⚡ OPEN MENU ⚡', 256, 56);
+
+                ctx.font = '22px monospace';
+                ctx.fillStyle = isHovered ? '#111111' : '#88ffaa';
+                ctx.fillText('POKE OR TRIGGER', 256, 106);
+
+                this.palmTexture.needsUpdate = true;
+            }
+
             registerVJButton(id, x, y, w, h, label, active = false, sub = '') {
                 this.virtualButtons.push({ id, x, y, w, h, label, active, sub });
                 const ctx = this.hudCtx;
+
+                if (id === 'close-hud-window') {
+                    ctx.fillStyle = 'rgba(60, 10, 10, 0.9)';
+                    ctx.strokeStyle = '#ff3344';
+                    ctx.lineWidth = 3;
+                    ctx.fillRect(x, y, w, h);
+                    ctx.strokeRect(x, y, w, h);
+                    ctx.fillStyle = '#ff4455';
+                    ctx.font = 'bold 26px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('✕', x + w / 2, y + h / 2);
+                    return;
+                }
+
                 ctx.fillStyle = active ? '#00ff66' : 'rgba(0, 20, 10, 0.9)';
                 ctx.strokeStyle = '#00ff66';
                 ctx.lineWidth = 3;
@@ -646,6 +734,10 @@
                 ctx.strokeRect(6, 6, 1012, 408);
 
                 this.virtualButtons = [];
+
+                // Always register the Close [X] Button in the top right corner
+                this.registerVJButton('close-hud-window', 958, 14, 52, 44, '✕');
+
                 const curMines = this.difficulties[this.currentDiff].mines;
                 let flagged = 0, unrevealed = 0;
                 for (let n of this.nodes) {
@@ -656,9 +748,9 @@
 
                 if (this.vrUIPage === 'hud') {
                     ctx.fillStyle = '#00ff66';
-                    ctx.font = 'bold 28px monospace';
+                    ctx.font = 'bold 26px monospace';
                     ctx.textAlign = 'center';
-                    ctx.fillText(`MINES: ${leftMines} | UNREVEALED: ${unrevealed} | MODE: ${this.flagMode ? 'FLAG [🚩]' : 'REVEAL [⛏️]'}`, 512, 42);
+                    ctx.fillText(`MINES: ${leftMines} | UNREVEALED: ${unrevealed} | MODE: ${this.flagMode ? 'FLAG [🚩]' : 'REVEAL [⛏️]'}`, 480, 42);
 
                     const genLabels = { 'tree': 'Tree', 'poisson-uniform': 'P-Uniform', 'poisson-seq': 'P-Sequential', 'poisson-biased': 'P-Biased' };
                     this.registerVJButton('toggle-tool', 40, 80, 450, 70, this.flagMode ? '🚩 TOOL: FLAGGING' : '⛏️ TOOL: REVEALING', this.flagMode);
@@ -668,9 +760,9 @@
                     this.registerVJButton('new-game', 40, 270, 944, 90, '⚡ RE-GENERATE / NEW GAME ⚡', true);
                 } else if (this.vrUIPage === 'gen') {
                     ctx.fillStyle = '#00ff66';
-                    ctx.font = 'bold 30px monospace';
+                    ctx.font = 'bold 28px monospace';
                     ctx.textAlign = 'center';
-                    ctx.fillText('SELECT GENERATION ALGORITHM', 512, 42);
+                    ctx.fillText('SELECT GENERATION ALGORITHM', 480, 42);
 
                     this.registerVJButton('set-gen-tree', 40, 75, 450, 85, 'TREE BRANCHING', this.genAlgorithm === 'tree', 'Recursive Branching');
                     this.registerVJButton('set-gen-p-uni', 534, 75, 450, 85, 'POISSON UNIFORM', this.genAlgorithm === 'poisson-uniform', 'Bridson 3D Uniform');
@@ -679,9 +771,9 @@
                     this.registerVJButton('close-page', 40, 300, 944, 75, 'BACK TO DASHBOARD', false);
                 } else if (this.vrUIPage === 'diff') {
                     ctx.fillStyle = '#00ff66';
-                    ctx.font = 'bold 30px monospace';
+                    ctx.font = 'bold 28px monospace';
                     ctx.textAlign = 'center';
-                    ctx.fillText('SELECT DIFFICULTY PRESET', 512, 42);
+                    ctx.fillText('SELECT DIFFICULTY PRESET', 480, 42);
 
                     this.registerVJButton('set-diff-easy', 40, 75, 450, 85, 'EASY', this.currentDiff === 'easy', '4 Mines (~24 Nodes)');
                     this.registerVJButton('set-diff-medium', 534, 75, 450, 85, 'MEDIUM', this.currentDiff === 'medium', '12 Mines (~48 Nodes)');
@@ -692,23 +784,23 @@
                     ctx.fillStyle = '#00ff66';
                     ctx.font = 'bold 26px monospace';
                     ctx.textAlign = 'center';
-                    ctx.fillText('3D GRAPH MINESWEEPER PROTOCOL', 512, 38);
+                    ctx.fillText('3D GRAPH MINESWEEPER PROTOCOL', 480, 38);
 
                     ctx.font = '20px monospace';
                     ctx.fillStyle = '#88ffaa';
                     ctx.textAlign = 'left';
                     ctx.fillText('• BLUE NODES: Revealed safe sector showing connected mine counts.', 40, 85);
                     ctx.fillText('• YELLOW NODES: Unrevealed neighbors exposing spatial counts early!', 40, 125);
-                    ctx.fillText('• TRIGGER: Reveal / Flag sector based on active tool.', 40, 165);
+                    ctx.fillText('• FLIP LEFT PALM UP: Summons the "Open Menu" badge at your wrist.', 40, 165);
                     ctx.fillText('• GRIP SQUEEZE: Grab, rotate & pull matrix freely in 3D space.', 40, 205);
-                    ctx.fillText('• HAND TRACKING: Poke node directly with index finger tip.', 40, 245);
+                    ctx.fillText('• HAND TRACKING: Poke nodes directly with your index finger tip.', 40, 245);
 
                     this.registerVJButton('close-page', 40, 295, 944, 80, 'RETURN TO SYSTEM', true);
                 } else if (this.vrUIPage === 'gameover') {
                     ctx.fillStyle = this.endGameData.color;
                     ctx.font = 'bold 36px monospace';
                     ctx.textAlign = 'center';
-                    ctx.fillText(this.endGameData.title, 512, 70);
+                    ctx.fillText(this.endGameData.title, 480, 70);
 
                     ctx.font = '24px monospace';
                     ctx.fillStyle = '#ffffff';
@@ -721,7 +813,28 @@
                 this.hudTexture.needsUpdate = true;
             }
 
+            openSpatialMenu() {
+                sfx.click();
+                this.isSpatialMenuOpen = true;
+                this.hudMesh.visible = true;
+                if (this.palmButtonMesh) this.palmButtonMesh.visible = false;
+                this.renderSpatialUI();
+                this.update2DHUD();
+            }
+
+            closeSpatialMenu() {
+                sfx.click();
+                this.isSpatialMenuOpen = false;
+                this.hudMesh.visible = false;
+                this.update2DHUD();
+            }
+
             handleSpatialUIPress(buttonId) {
+                if (buttonId === 'close-hud-window') {
+                    this.closeSpatialMenu();
+                    return;
+                }
+
                 sfx.click();
                 if (buttonId === 'toggle-tool') {
                     this.setFlagMode(!this.flagMode);
@@ -868,7 +981,6 @@
                     }
                 }
 
-                // Cross connections adapted to 3x spacing bounds
                 for (let i = 0; i < this.nodes.length; i++) {
                     for (let j = i + 1; j < this.nodes.length; j++) {
                         const d = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
@@ -1210,7 +1322,7 @@
                     document.getElementById('modal-gameover').style.display = 'flex';
 
                     this.vrUIPage = 'gameover';
-                    this.renderSpatialUI();
+                    this.openSpatialMenu();
                 }
             }
 
@@ -1243,7 +1355,7 @@
                     document.getElementById('modal-gameover').style.display = 'flex';
 
                     this.vrUIPage = 'gameover';
-                    this.renderSpatialUI();
+                    this.openSpatialMenu();
                 }, (count + 1) * delay + 200);
             }
 
@@ -1266,9 +1378,6 @@
                 }
             }
 
-            /* -------------------------------------------------------------
-               7. Particle Systems (Explosions)
-            ------------------------------------------------------------- */
             createExplosionParticles(worldPos, hex) {
                 const count = 40;
                 const pGeo = new THREE.BufferGeometry();
@@ -1318,7 +1427,7 @@
             }
 
             /* -------------------------------------------------------------
-               8. Interaction Handling: WebXR (Hands/Controllers) + Desktop
+               7. Interaction: WebXR (Hands/Controllers) + Desktop
             ------------------------------------------------------------- */
             triggerHaptic(controller, intensity = 0.5, duration = 30) {
                 const gamepad = controller.userData?.gamepad;
@@ -1329,6 +1438,11 @@
 
             onXRTriggerDown(controller) {
                 this.triggerHaptic(controller, 0.7, 40);
+
+                if (this.hoveredPalmButton) {
+                    this.openSpatialMenu();
+                    return;
+                }
                 if (this.hoveredVRButton) {
                     this.handleSpatialUIPress(this.hoveredVRButton.id);
                     return;
@@ -1348,14 +1462,82 @@
                 this.grabbedBy = this.grabbedBy.filter(c => c !== controller);
             }
 
+            updatePalmMenuState() {
+                if (this.isSpatialMenuOpen) {
+                    if (this.palmButtonMesh.visible) this.palmButtonMesh.visible = false;
+                    return;
+                }
+
+                let leftPalmUp = false;
+                let palmTargetPos = null;
+
+                // 1. Hand Tracking: check left hand joints
+                for (let hand of this.hands) {
+                    if (hand.userData?.handedness === 'left' && hand.joints) {
+                        const wrist = hand.joints['wrist'];
+                        const indexK = hand.joints['index-finger-metacarpal'];
+                        const pinkyK = hand.joints['pinky-finger-metacarpal'];
+
+                        if (wrist && indexK && pinkyK) {
+                            wrist.getWorldPosition(this.palmP1);
+                            indexK.getWorldPosition(this.palmP2);
+                            pinkyK.getWorldPosition(this.palmP3);
+
+                            const v1 = this.palmP2.sub(this.palmP1);
+                            const v2 = this.palmP3.sub(this.palmP1);
+                            this.palmNormal.crossVectors(v1, v2).normalize();
+
+                            // Normal pointing world upward = palm facing sky
+                            if (this.palmNormal.y > 0.45) {
+                                leftPalmUp = true;
+                                this.palmWorldPos.copy(this.palmP1).add(this.palmNormal.multiplyScalar(0.06));
+                                palmTargetPos = this.palmWorldPos;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // 2. Controller Mode: check left controller supination
+                if (!leftPalmUp) {
+                    for (let controller of this.controllers) {
+                        if (controller.userData?.handedness === 'left') {
+                            this.controllerPalmDir.set(0.7, 0.7, 0).normalize();
+                            const quat = controller.getWorldQuaternion(new THREE.Quaternion());
+                            this.controllerPalmDir.applyQuaternion(quat);
+
+                            if (this.controllerPalmDir.y > 0.45) {
+                                leftPalmUp = true;
+                                this.palmWorldPos.setFromMatrixPosition(controller.matrixWorld);
+                                this.palmWorldPos.addScaledVector(this.controllerPalmDir, 0.08);
+                                palmTargetPos = this.palmWorldPos;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (leftPalmUp && palmTargetPos) {
+                    this.palmButtonMesh.visible = true;
+                    this.palmButtonMesh.position.copy(palmTargetPos);
+                    const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
+                    this.palmButtonMesh.lookAt(cam.position);
+                } else {
+                    this.palmButtonMesh.visible = false;
+                }
+            }
+
             handleVRInteractions() {
                 let foundHoverNode = null;
                 let foundHoverBtn = null;
+                let foundHoverPalm = false;
+
                 const nodeMeshes = this.nodes.map(n => n.mesh);
                 const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
                 this.raycaster.camera = cam;
 
-                // Controller Raycasting with expanded reach
+                this.updatePalmMenuState();
+
                 for (let controller of this.controllers) {
                     this.workingMatrix.identity().extractRotation(controller.matrixWorld);
                     this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
@@ -1363,24 +1545,36 @@
 
                     const laser = controller.getObjectByName('laser');
 
-                    // Check Spatial HUD UI first
-                    const hudHits = this.raycaster.intersectObject(this.hudMesh, false);
-                    if (hudHits.length > 0) {
-                        const uv = hudHits[0].uv;
-                        const canvasX = uv.x * 1024;
-                        const canvasY = (1 - uv.y) * 420;
-
-                        for (let btn of this.virtualButtons) {
-                            if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
-                                foundHoverBtn = btn;
-                                break;
-                            }
+                    // Check Palm Menu Button Raycast
+                    if (this.palmButtonMesh.visible) {
+                        const palmHits = this.raycaster.intersectObject(this.palmButtonMesh, false);
+                        if (palmHits.length > 0) {
+                            foundHoverPalm = true;
+                            if (laser) laser.scale.z = palmHits[0].distance;
+                            break;
                         }
-                        if (laser) laser.scale.z = hudHits[0].distance;
-                        break;
                     }
 
-                    // Check Nodes
+                    // Check Spatial HUD UI
+                    if (this.hudMesh.visible) {
+                        const hudHits = this.raycaster.intersectObject(this.hudMesh, false);
+                        if (hudHits.length > 0) {
+                            const uv = hudHits[0].uv;
+                            const canvasX = uv.x * 1024;
+                            const canvasY = (1 - uv.y) * 420;
+
+                            for (let btn of this.virtualButtons) {
+                                if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
+                                    foundHoverBtn = btn;
+                                    break;
+                                }
+                            }
+                            if (laser) laser.scale.z = hudHits[0].distance;
+                            break;
+                        }
+                    }
+
+                    // Check Graph Nodes
                     const hits = this.raycaster.intersectObjects(nodeMeshes, false);
                     if (hits.length > 0) {
                         foundHoverNode = this.nodes[hits[0].object.userData.nodeId];
@@ -1391,12 +1585,20 @@
                     }
                 }
 
-                // Direct Physical Hand Finger Poke
+                // Direct Hand Finger Pokes
                 for (let hand of this.hands) {
                     if (hand.joints) {
                         const indexTip = hand.joints['index-finger-tip'];
                         if (indexTip) {
                             const tipPos = this.tempVec.setFromMatrixPosition(indexTip.matrixWorld);
+
+                            // Poke palm button to open menu
+                            if (this.palmButtonMesh.visible && tipPos.distanceTo(this.palmButtonMesh.position) < 0.05) {
+                                this.openSpatialMenu();
+                                return;
+                            }
+
+                            // Poke node directly
                             for (let n of this.nodes) {
                                 const nWorld = n.mesh.getWorldPosition(this.tempNodePos);
                                 if (tipPos.distanceTo(nWorld) < NODE_RADIUS * 1.3) {
@@ -1410,7 +1612,12 @@
                     }
                 }
 
-                // Visual Scaling for Node Hover
+                // Hover visual updates
+                if (this.hoveredPalmButton !== foundHoverPalm) {
+                    this.hoveredPalmButton = foundHoverPalm;
+                    this.renderPalmButtonTexture(this.hoveredPalmButton);
+                }
+
                 if (this.hoveredNode !== foundHoverNode) {
                     if (this.hoveredNode) this.hoveredNode.mesh.scale.set(1, 1, 1);
                     this.hoveredNode = foundHoverNode;
@@ -1422,7 +1629,7 @@
 
                 this.hoveredVRButton = foundHoverBtn;
 
-                // 6DoF Field Manipulation via Grip Squeeze
+                // 6DoF Field Manipulation
                 if (this.grabbedBy.length === 1) {
                     const c = this.grabbedBy[0];
                     const delta = new THREE.Matrix4().copy(c.matrixWorld).multiply(this.previousControllerMatrix.invert());
@@ -1449,16 +1656,27 @@
                     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
                     dRay.setFromCamera(mouse, this.camera);
 
+                    // Check Palm Button Click
+                    if (this.palmButtonMesh.visible) {
+                        const pHits = dRay.intersectObject(this.palmButtonMesh, false);
+                        if (pHits.length > 0) {
+                            this.openSpatialMenu();
+                            return;
+                        }
+                    }
+
                     // Check Spatial HUD in Desktop Mode
-                    const hudHits = dRay.intersectObject(this.hudMesh, false);
-                    if (hudHits.length > 0) {
-                        const uv = hudHits[0].uv;
-                        const canvasX = uv.x * 1024;
-                        const canvasY = (1 - uv.y) * 420;
-                        for (let btn of this.virtualButtons) {
-                            if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
-                                this.handleSpatialUIPress(btn.id);
-                                return;
+                    if (this.hudMesh.visible) {
+                        const hudHits = dRay.intersectObject(this.hudMesh, false);
+                        if (hudHits.length > 0) {
+                            const uv = hudHits[0].uv;
+                            const canvasX = uv.x * 1024;
+                            const canvasY = (1 - uv.y) * 420;
+                            for (let btn of this.virtualButtons) {
+                                if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
+                                    this.handleSpatialUIPress(btn.id);
+                                    return;
+                                }
                             }
                         }
                     }
@@ -1476,7 +1694,7 @@
             }
 
             /* -------------------------------------------------------------
-               9. 2D DOM UI & Modal Bindings
+               8. 2D DOM UI & Modal Bindings
             ------------------------------------------------------------- */
             setFlagMode(val) {
                 this.flagMode = val;
@@ -1491,7 +1709,11 @@
                 document.getElementById('btn-mode-flag').onclick = () => { sfx.click(); this.setFlagMode(true); };
                 document.getElementById('btn-reset').onclick = () => { sfx.click(); this.startNewGame(); };
 
-                // Modals
+                document.getElementById('btn-toggle-spatial-menu').onclick = () => {
+                    if (this.isSpatialMenuOpen) this.closeSpatialMenu();
+                    else this.openSpatialMenu();
+                };
+
                 const mGen = document.getElementById('modal-gen');
                 const mDiff = document.getElementById('modal-difficulty');
                 const mTut = document.getElementById('modal-tutorial');
@@ -1545,6 +1767,7 @@
                 const genLabels = { 'tree': 'Tree', 'poisson-uniform': 'P-Uniform', 'poisson-seq': 'P-Sequential', 'poisson-biased': 'P-Biased' };
                 document.getElementById('hud-gen').textContent = genLabels[this.genAlgorithm] || 'Tree';
                 document.getElementById('hud-mode').textContent = this.flagMode ? '🚩 Flag' : '⛏️ Reveal';
+                document.getElementById('btn-toggle-spatial-menu').textContent = `3D Menu: ${this.isSpatialMenuOpen ? 'Open' : 'Closed'}`;
             }
 
             startNewGame() {
@@ -1556,7 +1779,7 @@
             }
 
             /* -------------------------------------------------------------
-               10. Animation & Render Loop
+               9. Animation & Render Loop
             ------------------------------------------------------------- */
             render(time) {
                 const dt = 0.016;
