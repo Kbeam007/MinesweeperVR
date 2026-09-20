@@ -238,7 +238,7 @@
 
         <footer>
             <div class="hud-box interactive vr-tip">
-                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand/Trigger (Blue) = Open Node</span> | <span style="color:#ff4466;">Left Hand/Trigger (Red) = Mark Mine</span> | Squeeze Grip = Rotate Field | Left Palm Up = Menu
+                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Thumbstick = Rotate Grid | Grip = Pull Grid (Release has zero-G inertia, click Grip again to brake)
             </div>
             <div class="hud-box interactive" style="display:flex; gap: 10px;">
                 <button class="btn active" id="btn-mode-reveal">⛏️ Click: Reveal</button>
@@ -294,10 +294,10 @@
            • <b>Safe Start:</b> Your first reveal or poke is always 100% safe.<br>
            • <b>Blue Nodes:</b> Revealed sectors showing adjacent mine count.<br>
            • <b>Yellow Nodes:</b> Clue nodes showing unrevealed neighboring mine counts.<br>
-           • <b style="color:#00d0ff;">🔵 RIGHT HAND (BLUE):</b> Open/Reveal nodes (Laser Trigger or direct index poke).<br>
-           • <b style="color:#ff4466;">🔴 LEFT HAND (RED):</b> Flag/Mark mines (Laser Trigger or direct index poke).<br>
-           • <b>Desktop:</b> Left Click = Reveal, Right Click = Flag, Drag = Orbit.<br>
-           • <b>VR Field Drag:</b> Squeeze Grip = Move & Rotate Matrix in 3D.<br>
+           • <b style="color:#00d0ff;">🔵 RIGHT HAND (BLUE):</b> Open/Reveal nodes (Trigger or poke).<br>
+           • <b style="color:#ff4466;">🔴 LEFT HAND (RED):</b> Flag/Mark mines (Trigger or poke).<br>
+           • <b>VR Thumbstick:</b> Rotate the whole matrix in place freely.<br>
+           • <b>VR Zero-G Inertia:</b> Squeeze & throw the field with Grip. Release it to float in weightlessness. <b>Click Grip again anytime to brake & stop!</b><br>
            • <b>Wrist Menu:</b> Flip your left palm upward anytime to summon the dashboard!
         </p>
         <div class="modal-buttons">
@@ -395,9 +395,8 @@
             LINK_DEFAULT: 0x555555,
             LINK_SAFE: 0x0055ff,
             LINK_MINE: 0xff1111,
-            // Controller & Hand Roles
-            RIGHT_REVEAL: 0x00a2ff, // Blue
-            LEFT_FLAG: 0xff2244     // Red
+            RIGHT_REVEAL: 0x00a2ff,
+            LEFT_FLAG: 0xff2244
         };
 
         const NODE_RADIUS = 0.045;
@@ -506,8 +505,13 @@
                     }
                 };
 
+                // Grip & Weightless Inertia state
                 this.grabbedBy = [];
                 this.previousControllerMatrix = new THREE.Matrix4();
+                this.linearVelocity = new THREE.Vector3();
+                this.angularVelocity = new THREE.Vector3();
+                this.isDrifting = false;
+
                 this.vrUIPage = 'hud';
                 this.endGameData = { title: 'MISSION FAILED', message: 'Core detonated.', color: '#ff2222' };
 
@@ -584,7 +588,6 @@
                     controller.userData.hoveredVRButton = null;
                     controller.userData.hoveredPalm = false;
 
-                    // Laser line
                     const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
                     const lineMat = new THREE.LineBasicMaterial({
                         color: 0x00ff66,
@@ -599,7 +602,6 @@
                     laser.renderOrder = 10000;
                     controller.add(laser);
 
-                    // Reticle ring
                     const reticleGeo = new THREE.RingGeometry(0.008, 0.015, 24);
                     const reticleMat = new THREE.MeshBasicMaterial({
                         color: 0x00ff66,
@@ -830,7 +832,6 @@
                 ctx.strokeRect(6, 6, 1012, 408);
 
                 this.virtualButtons = [];
-
                 this.registerVJButton('close-hud-window', 958, 14, 52, 44, '✕');
 
                 const curMines = this.difficulties[this.currentDiff].mines;
@@ -888,23 +889,24 @@
                     ctx.font = 'bold 19px monospace';
                     ctx.fillStyle = '#00c8ff';
                     ctx.textAlign = 'left';
-                    ctx.fillText('• RIGHT CONTROLLER / HAND (BLUE):', 40, 75);
-                    ctx.font = '16px monospace';
+                    ctx.fillText('• RIGHT CONTROLLER / HAND (BLUE):', 40, 70);
+                    ctx.font = '15px monospace';
                     ctx.fillStyle = '#ffffff';
-                    ctx.fillText('  Triggers laser / finger pokes REVEAL and open nodes safe from mines.', 60, 100);
+                    ctx.fillText('  Triggers laser / finger pokes REVEAL safe nodes.', 60, 92);
 
                     ctx.font = 'bold 19px monospace';
                     ctx.fillStyle = '#ff4466';
-                    ctx.fillText('• LEFT CONTROLLER / HAND (RED):', 40, 135);
-                    ctx.font = '16px monospace';
+                    ctx.fillText('• LEFT CONTROLLER / HAND (RED):', 40, 122);
+                    ctx.font = '15px monospace';
                     ctx.fillStyle = '#ffffff';
-                    ctx.fillText('  Triggers laser / finger pokes FLAG and unflag dangerous mine nodes.', 60, 160);
+                    ctx.fillText('  Triggers laser / finger pokes FLAG dangerous mine nodes.', 60, 144);
 
-                    ctx.font = '16px monospace';
+                    ctx.font = '15px monospace';
                     ctx.fillStyle = '#88ffaa';
-                    ctx.fillText('• SQUEEZE GRIP: Hold either grip button to rotate & move the field.', 40, 200);
-                    ctx.fillText('• FLIP LEFT PALM UP: Summons the wrist button to recall this menu.', 40, 230);
-                    ctx.fillText('• YELLOW NODES: Clue nodes revealing counts before being opened.', 40, 260);
+                    ctx.fillText('• THUMBSTICKS: Rotate the entire 3D matrix in place.', 40, 180);
+                    ctx.fillText('• SQUEEZE GRIP: Drag matrix in space. Release to float in weightless inertia!', 40, 208);
+                    ctx.fillText('• GRIP CLICK (BRAKE): Click Grip again at any time to instantly freeze matrix.', 40, 236);
+                    ctx.fillText('• FLIP LEFT PALM UP: Summons the wrist button to recall this menu.', 40, 264);
 
                     this.registerVJButton('close-page', 40, 295, 944, 80, 'RETURN TO SYSTEM', true);
                 } else if (this.vrUIPage === 'gameover') {
@@ -1296,6 +1298,10 @@
                 this.worldAnchor.scale.set(1, 1, 1);
                 this.graphGroup.rotation.set(0, 0, 0);
 
+                this.linearVelocity.set(0, 0, 0);
+                this.angularVelocity.set(0, 0, 0);
+                this.isDrifting = false;
+
                 const box = new THREE.Box3();
                 this.nodes.forEach(n => box.expandByPoint(n.pos));
                 const sphere = new THREE.Sphere();
@@ -1652,7 +1658,6 @@
                 }
                 if (controller.userData.hoveredNode) {
                     const isRightHand = controller.userData?.handedness === 'right';
-                    // Right Hand = REVEAL, Left Hand = FLAG
                     if (isRightHand) {
                         this.revealNode(controller.userData.hoveredNode.id);
                     } else {
@@ -1662,12 +1667,32 @@
             }
 
             onXRGripStart(controller) {
-                this.grabbedBy.push(controller);
+                // Instantly brake and freeze any ongoing zero-G inertia drift
+                this.linearVelocity.set(0, 0, 0);
+                this.angularVelocity.set(0, 0, 0);
+                this.isDrifting = false;
+
+                if (!this.grabbedBy.includes(controller)) {
+                    this.grabbedBy.push(controller);
+                }
                 this.previousControllerMatrix.copy(controller.matrixWorld);
             }
 
             onXRGripEnd(controller) {
                 this.grabbedBy = this.grabbedBy.filter(c => c !== controller);
+                
+                if (this.grabbedBy.length === 0) {
+                    // Activate weightless inertia if user was moving or flicking
+                    if (this.linearVelocity.length() > 0.02 || this.angularVelocity.length() > 0.04) {
+                        this.isDrifting = true;
+                    } else {
+                        this.linearVelocity.set(0, 0, 0);
+                        this.angularVelocity.set(0, 0, 0);
+                        this.isDrifting = false;
+                    }
+                } else {
+                    this.previousControllerMatrix.copy(this.grabbedBy[0].matrixWorld);
+                }
             }
 
             updatePalmMenuState() {
@@ -1740,16 +1765,64 @@
                 }
             }
 
-            handleVRInteractions() {
+            handleVRInteractions(dt) {
                 const nodeMeshes = this.nodes.map(n => n.mesh);
                 const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
                 this.raycaster.camera = cam;
 
                 this.updatePalmMenuState();
 
+                /* -------------------------------------------------------------
+                   1. Thumbstick Matrix Rotation
+                ------------------------------------------------------------- */
+                let thumbX = 0;
+                let thumbY = 0;
+
+                for (let controller of this.controllers) {
+                    const gamepad = controller.userData?.gamepad;
+                    if (gamepad && gamepad.axes) {
+                        let sx = 0, sy = 0;
+                        if (gamepad.axes.length >= 4) {
+                            sx = gamepad.axes[2];
+                            sy = gamepad.axes[3];
+                        } else if (gamepad.axes.length >= 2) {
+                            sx = gamepad.axes[0];
+                            sy = gamepad.axes[1];
+                        }
+                        const deadzone = 0.15;
+                        if (Math.abs(sx) > deadzone) thumbX += sx;
+                        if (Math.abs(sy) > deadzone) thumbY += sy;
+                    }
+                }
+
+                if (Math.abs(thumbX) > 0.05 || Math.abs(thumbY) > 0.05) {
+                    const rotSpeed = 2.2;
+                    const yawAngle = -thumbX * rotSpeed * dt;
+                    const pitchAngle = -thumbY * rotSpeed * dt;
+
+                    // Yaw around World Y
+                    const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
+
+                    // Pitch around Camera's View Right vector
+                    const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+                    camRight.y = 0;
+                    camRight.normalize();
+                    const qPitch = new THREE.Quaternion().setFromAxisAngle(camRight, pitchAngle);
+
+                    const qTotal = new THREE.Quaternion().multiplyQuaternions(qPitch, qYaw);
+                    this.worldAnchor.quaternion.premultiply(qTotal);
+                    this.needsSpriteUpdate = true;
+
+                    // Thumbstick activity dampens angular drift
+                    this.angularVelocity.multiplyScalar(0.7);
+                }
+
                 const currentlyHoveredNodeIds = new Set();
                 let anyPalmHovered = false;
 
+                /* -------------------------------------------------------------
+                   2. Laser Raycasting
+                ------------------------------------------------------------- */
                 for (let controller of this.controllers) {
                     const prevNode = controller.userData.hoveredNode;
                     controller.userData.hoveredPalm = false;
@@ -1764,7 +1837,7 @@
                     const reticle = controller.userData?.reticle;
                     if (reticle) reticle.visible = false;
 
-                    // 1. Check Palm Button
+                    // Palm Button
                     if (this.palmButtonMesh.visible) {
                         const palmHits = this.raycaster.intersectObject(this.palmButtonMesh, false);
                         if (palmHits.length > 0) {
@@ -1780,7 +1853,7 @@
                         }
                     }
 
-                    // 2. Check Spatial HUD UI
+                    // Spatial HUD UI
                     if (this.hudMesh.visible) {
                         const hudHits = this.raycaster.intersectObject(this.hudMesh, false);
                         if (hudHits.length > 0) {
@@ -1808,7 +1881,7 @@
                         }
                     }
 
-                    // 3. Check Graph Nodes
+                    // Graph Nodes
                     const hits = this.raycaster.intersectObjects(nodeMeshes, false);
                     if (hits.length > 0) {
                         const targetNode = this.nodes[hits[0].object.userData.nodeId];
@@ -1830,7 +1903,9 @@
                     }
                 }
 
-                // 4. Direct Hand Finger Pokes
+                /* -------------------------------------------------------------
+                   3. Direct Finger Pokes
+                ------------------------------------------------------------- */
                 for (let hand of this.hands) {
                     if (hand.joints) {
                         const indexTip = hand.joints['index-finger-tip'];
@@ -1878,13 +1953,62 @@
                     this.renderPalmButtonTexture(this.hoveredPalmButton);
                 }
 
-                // 6DoF matrix grabbing
+                /* -------------------------------------------------------------
+                   4. Grip Movement & Zero-G Inertia
+                ------------------------------------------------------------- */
                 if (this.grabbedBy.length === 1) {
                     const c = this.grabbedBy[0];
                     const delta = new THREE.Matrix4().copy(c.matrixWorld).multiply(this.previousControllerMatrix.invert());
                     this.worldAnchor.applyMatrix4(delta);
+
+                    // Compute instantaneous linear velocity
+                    const deltaTrans = new THREE.Vector3().setFromMatrixPosition(delta);
+                    const instLinVel = deltaTrans.divideScalar(Math.max(dt, 0.001));
+
+                    // Compute instantaneous angular velocity (axis * angle / dt)
+                    const deltaRot = new THREE.Quaternion().setFromRotationMatrix(delta);
+                    let angle = 2 * Math.acos(Math.min(1, Math.max(-1, deltaRot.w)));
+                    let axis = new THREE.Vector3(deltaRot.x, deltaRot.y, deltaRot.z);
+                    if (axis.lengthSq() > 0.0001) {
+                        axis.normalize();
+                    } else {
+                        axis.set(0, 1, 0);
+                        angle = 0;
+                    }
+                    const instAngVel = axis.multiplyScalar(angle / Math.max(dt, 0.001));
+
+                    // Exponential moving average for smooth, weightless release
+                    const smoothFactor = 0.42;
+                    this.linearVelocity.lerp(instLinVel, smoothFactor);
+                    this.angularVelocity.lerp(instAngVel, smoothFactor);
+
                     this.previousControllerMatrix.copy(c.matrixWorld);
                     this.needsSpriteUpdate = true;
+                } else if (this.isDrifting && this.grabbedBy.length === 0) {
+                    // Weightless glide with slight cosmic drag
+                    const drag = 0.992;
+                    this.linearVelocity.multiplyScalar(drag);
+                    this.angularVelocity.multiplyScalar(drag);
+
+                    // Apply linear glide
+                    this.worldAnchor.position.addScaledVector(this.linearVelocity, dt);
+
+                    // Apply angular spin
+                    const angSpeed = this.angularVelocity.length();
+                    if (angSpeed > 0.0001) {
+                        const rotAxis = this.angularVelocity.clone().normalize();
+                        const qStep = new THREE.Quaternion().setFromAxisAngle(rotAxis, angSpeed * dt);
+                        this.worldAnchor.quaternion.premultiply(qStep);
+                    }
+
+                    this.needsSpriteUpdate = true;
+
+                    // Stop when drift speed becomes imperceptible
+                    if (this.linearVelocity.length() < 0.004 && this.angularVelocity.length() < 0.008) {
+                        this.linearVelocity.set(0, 0, 0);
+                        this.angularVelocity.set(0, 0, 0);
+                        this.isDrifting = false;
+                    }
                 }
             }
 
@@ -2041,7 +2165,7 @@
                 this.updateSpatialHUDPosition();
 
                 if (this.renderer.xr.isPresenting) {
-                    this.handleVRInteractions();
+                    this.handleVRInteractions(dt);
                 } else {
                     this.controls.update();
                     if (!this.inGame) {
