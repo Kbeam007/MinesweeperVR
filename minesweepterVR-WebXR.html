@@ -3,26 +3,209 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>3D Graph Minesweeper VR - Meta Quest</title>
+    <title>3D Minesweeper VR - Meta Quest & Desktop</title>
     <style>
         :root {
             --neon-green: #00ff66;
-            --neon-glow: 0 0 10px rgba(0, 255, 102, 0.6);
-            --bg-dark: rgba(5, 15, 8, 0.88);
+            --neon-green-dim: #008833;
+            --neon-glow: 0 0 10px rgba(0, 255, 102, 0.6), 0 0 20px rgba(0, 255, 102, 0.3);
+            --bg-dark: rgba(5, 15, 8, 0.92);
         }
-        * { box-sizing: border-box; user-select: none; margin: 0; padding: 0; }
-        body { background-color: #000; overflow: hidden; font-family: 'Courier New', monospace; color: var(--neon-green); }
-        #webgl-canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; display: block; z-index: 1; }
-        .ui-layer { position: absolute; z-index: 10; pointer-events: none; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 16px; }
-        .interactive { pointer-events: auto; }
-        header, footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
-        .hud-box { background: var(--bg-dark); border: 2px solid var(--neon-green); box-shadow: var(--neon-glow); border-radius: 8px; padding: 10px 16px; font-size: 14px; text-transform: uppercase; }
-        .btn { background: #000; color: var(--neon-green); border: 2px solid var(--neon-green); box-shadow: var(--neon-glow); padding: 8px 14px; font-family: inherit; font-size: 13px; font-weight: bold; border-radius: 6px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; }
-        .btn:hover { background: var(--neon-green); color: #000; }
-        .btn.active { background: var(--neon-green); color: #000; }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: #000;
+            overflow: hidden;
+            font-family: 'Courier New', Courier, monospace;
+            color: var(--neon-green);
+        }
+
+        #webgl-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            z-index: 1;
+        }
+
+        /* 2D HUD & Overlay UI */
+        .ui-layer {
+            position: absolute;
+            z-index: 10;
+            pointer-events: none;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 16px;
+        }
+
+        .interactive {
+            pointer-events: auto;
+        }
+
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .hud-box {
+            background: var(--bg-dark);
+            border: 2px solid var(--neon-green);
+            box-shadow: var(--neon-glow);
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 13px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        .stats-hud {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .stat-item span {
+            font-weight: bold;
+            font-size: 16px;
+            text-shadow: var(--neon-glow);
+        }
+
+        .btn {
+            background: #000;
+            color: var(--neon-green);
+            border: 2px solid var(--neon-green);
+            box-shadow: var(--neon-glow);
+            padding: 8px 14px;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-transform: uppercase;
+        }
+
+        .btn:hover {
+            background: var(--neon-green);
+            color: #000;
+            box-shadow: 0 0 15px var(--neon-green);
+        }
+
+        .btn:active {
+            transform: scale(0.96);
+        }
+
+        .btn.active {
+            background: var(--neon-green);
+            color: #000;
+        }
+
+        footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .vr-tip {
+            font-size: 11px;
+            color: #88ffaa;
+            text-transform: none;
+            letter-spacing: 0px;
+        }
+
+        /* Modals */
+        .modal {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 12, 5, 0.96);
+            border: 2px solid var(--neon-green);
+            box-shadow: 0 0 25px rgba(0, 255, 102, 0.8);
+            border-radius: 12px;
+            padding: 24px 30px;
+            text-align: center;
+            z-index: 100;
+            display: none;
+            flex-direction: column;
+            gap: 16px;
+            min-width: 350px;
+            max-width: 90vw;
+        }
+
+        .modal h2 {
+            font-size: 20px;
+            text-shadow: var(--neon-glow);
+            letter-spacing: 2px;
+        }
+
+        .modal p {
+            font-size: 13px;
+            line-height: 1.5;
+            color: #88ffaa;
+            text-align: left;
+        }
+
+        .modal-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 14px;
+            margin-top: 10px;
+        }
+
+        .diff-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .gen-options {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .gen-options .btn {
+            text-align: left;
+            padding: 10px 14px;
+        }
+
+        .gen-desc {
+            font-size: 11px;
+            font-weight: normal;
+            color: #88ffaa;
+            display: block;
+            margin-top: 3px;
+            text-transform: none;
+        }
+
+        @media (max-width: 768px) {
+            .stats-hud { gap: 8px; font-size: 10px; }
+            .stat-item span { font-size: 12px; }
+            .btn { padding: 6px 10px; font-size: 11px; }
+        }
     </style>
 
-    <!-- Three.js and WebXR Addons -->
     <script type="importmap">
     {
         "imports": {
@@ -34,25 +217,103 @@
 </head>
 <body>
     <canvas id="webgl-canvas"></canvas>
-    
+
+    <!-- 2D Screen Overlay -->
     <div class="ui-layer">
         <header>
-            <div class="hud-box interactive">
-                Mines: <span id="hud-mines">0</span> | Nodes: <span id="hud-nodes">0</span> | Gen: <span id="hud-gen">Tree</span> | Mode: <span id="hud-mode">Reveal</span>
+            <div class="hud-box stats-hud interactive">
+                <div class="stat-item">Mines: <span id="hud-mines">0</span></div>
+                <div class="stat-item">Left: <span id="hud-nodes">0</span></div>
+                <div class="stat-item">Diff: <span id="hud-diff" style="color:#88ffaa;">Easy</span></div>
+                <div class="stat-item">Gen: <span id="hud-gen" style="color:#88ffaa;">Tree</span></div>
+                <div class="stat-item">Tool: <span id="hud-mode" style="color:#88ffaa;">⛏️ Reveal</span></div>
             </div>
             <div class="hud-box interactive" style="display: flex; gap: 8px;">
-                <button class="btn" id="btn-toggle-gen">Gen: Tree</button>
-                <button class="btn" id="btn-desktop-toggle-flag">🚩 Flag Mode</button>
-                <button class="btn" id="btn-desktop-reset">Reset</button>
+                <button class="btn" id="btn-gen-mode">Gen Mode</button>
+                <button class="btn" id="btn-difficulty">Difficulty</button>
+                <button class="btn" id="btn-tutorial">Tutorial</button>
             </div>
         </header>
+
         <footer>
-            <div class="hud-box interactive" style="font-size: 12px;">
-                <b>VR Controls:</b> Trigger = Reveal/Flag | Grip Drag = Move/Rotate Field | Hands = Physical Finger Poke
+            <div class="hud-box interactive vr-tip">
+                <b>VR CONTROLS:</b> Trigger = Reveal/Flag | Squeeze Grip = Move & Rotate Matrix | Index Finger = Direct Poke
+            </div>
+            <div class="hud-box interactive" style="display:flex; gap: 10px;">
+                <button class="btn active" id="btn-mode-reveal">⛏️ Click: Reveal</button>
+                <button class="btn" id="btn-mode-flag">🚩 Click: Flag</button>
+                <button class="btn" id="btn-reset">New Game</button>
             </div>
         </footer>
     </div>
 
+    <!-- 2D Generation Selection Modal -->
+    <div id="modal-gen" class="modal interactive">
+        <h2>GENERATION ALGORITHM</h2>
+        <div class="gen-options">
+            <button class="btn" data-gen="tree">
+                Tree Branching
+                <span class="gen-desc">Recursive branching with distance checks and closed cross-links.</span>
+            </button>
+            <button class="btn" data-gen="poisson-uniform">
+                Poisson Disc (Uniform Random)
+                <span class="gen-desc">Standard Bridson: picks any active seed randomly across the cloud.</span>
+            </button>
+            <button class="btn" data-gen="poisson-seq">
+                Poisson Disc (Sequential FIFO)
+                <span class="gen-desc">Expands layer by layer uniformly outward from the center origin.</span>
+            </button>
+            <button class="btn" data-gen="poisson-biased">
+                Poisson Disc (Biased SwapBack)
+                <span class="gen-desc">Continuous snake-like expansion frontier creating organic branches.</span>
+            </button>
+        </div>
+        <div class="modal-buttons">
+            <button class="btn modal-close">Back</button>
+        </div>
+    </div>
+
+    <!-- 2D Difficulty Selection Modal -->
+    <div id="modal-difficulty" class="modal interactive">
+        <h2>SELECT DIFFICULTY</h2>
+        <div class="diff-grid">
+            <button class="btn" data-diff="easy">Easy (4 Mines)</button>
+            <button class="btn" data-diff="medium">Medium (12 Mines)</button>
+            <button class="btn" data-diff="hard">Hard (28 Mines)</button>
+            <button class="btn" data-diff="insane">Insane (55 Mines)</button>
+        </div>
+        <div class="modal-buttons">
+            <button class="btn modal-close">Back</button>
+        </div>
+    </div>
+
+    <!-- 2D Tutorial Modal -->
+    <div id="modal-tutorial" class="modal interactive">
+        <h2>3D MINESWEEPER RULES</h2>
+        <p>• Nodes form a 3D web connected via cybernetic data links.<br>
+           • <b>Safe Start:</b> Your first click or poke is always 100% safe.<br>
+           • <b>Blue Nodes:</b> Revealed sectors showing adjacent mine count.<br>
+           • <b>Yellow Nodes:</b> Clue nodes showing unrevealed neighboring mine counts.<br>
+           • <b>Desktop:</b> Left Click = Reveal, Right Click = Flag, Drag = Orbit.<br>
+           • <b>VR:</b> Index Trigger = Reveal/Flag, Squeeze Grip = Move & Rotate Field.<br>
+           • <b>Direct Hand Tracking:</b> Poke any node directly with your index finger!
+        </p>
+        <div class="modal-buttons">
+            <button class="btn modal-close">Understood</button>
+        </div>
+    </div>
+
+    <!-- 2D Game Over / Victory Modal -->
+    <div id="modal-gameover" class="modal interactive">
+        <h2 id="endgame-title" style="color: #ff3333;">MISSION FAILED</h2>
+        <p id="endgame-msg" style="text-align: center;">You triggered a volatile core!</p>
+        <div class="modal-buttons">
+            <button class="btn" id="btn-inspect">Inspect Field</button>
+            <button class="btn" id="btn-play-again">Play Again</button>
+        </div>
+    </div>
+
+    <!-- WebXR & Engine Script -->
     <script type="module">
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -72,7 +333,7 @@
                 }
                 if (this.ctx.state === 'suspended') this.ctx.resume();
             }
-            playTone(freq, type = 'sine', dur = 0.1, gainVal = 0.1) {
+            playTone(freq, type = 'sine', duration = 0.1, gainVal = 0.1) {
                 try {
                     this.init();
                     const osc = this.ctx.createOscillator();
@@ -80,22 +341,26 @@
                     osc.type = type;
                     osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
                     gain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
-                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + dur);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
                     osc.connect(gain);
                     gain.connect(this.ctx.destination);
                     osc.start();
-                    osc.stop(this.ctx.currentTime + dur);
-                } catch(e) {}
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch (e) {}
             }
-            click() { this.playTone(800, 'sine', 0.05, 0.08); }
-            reveal() { this.playTone(520, 'triangle', 0.12, 0.12); }
+            click() { this.playTone(800, 'sine', 0.05, 0.07); }
+            reveal() { this.playTone(520, 'triangle', 0.12, 0.1); }
             flag() { this.playTone(320, 'square', 0.08, 0.06); }
             unflag() { this.playTone(240, 'square', 0.08, 0.06); }
-            win() { [440, 554, 659, 880].forEach((f, i) => setTimeout(() => this.playTone(f, 'sine', 0.25, 0.15), i * 110)); }
+            win() {
+                [440, 554, 659, 880, 1108].forEach((f, i) => {
+                    setTimeout(() => this.playTone(f, 'sine', 0.25, 0.14), i * 110);
+                });
+            }
             explode() {
                 try {
                     this.init();
-                    const bufferSize = this.ctx.sampleRate * 0.4;
+                    const bufferSize = this.ctx.sampleRate * 0.45;
                     const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
                     const data = buffer.getChannelData(0);
                     for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
@@ -103,35 +368,36 @@
                     noise.buffer = buffer;
                     const filter = this.ctx.createBiquadFilter();
                     filter.type = 'lowpass';
-                    filter.frequency.setValueAtTime(400, this.ctx.currentTime);
-                    filter.frequency.linearRampToValueAtTime(50, this.ctx.currentTime + 0.4);
+                    filter.frequency.setValueAtTime(450, this.ctx.currentTime);
+                    filter.frequency.linearRampToValueAtTime(40, this.ctx.currentTime + 0.45);
                     const gain = this.ctx.createGain();
                     gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
-                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.4);
-                    noise.connect(filter); filter.connect(gain); gain.connect(this.ctx.destination);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.45);
+                    noise.connect(filter);
+                    filter.connect(gain);
+                    gain.connect(this.ctx.destination);
                     noise.start();
-                } catch(e) {}
+                } catch (e) {}
             }
         }
         const sfx = new SoundFX();
 
         /* -------------------------------------------------------------
-           2. Visual Constants & Cached Material Architecture
+           2. Visual Constants & Real-World Dimensions (Meters)
         ------------------------------------------------------------- */
         const COLORS = {
             NODE_UNREVEALED: 0x555555,
-            NODE_REVEALED: 0x0044ff,
+            NODE_REVEALED: 0x0055ff,
             NODE_HINT: 0xe5dc1a,
             NODE_FLAG: 0xff1111,
             NODE_MINE: 0xff0022,
-            LINK_DEFAULT: 0x2e3d30,
+            LINK_DEFAULT: 0x223328,
             LINK_SAFE: 0x0055ff,
             LINK_MINE: 0xff1111
         };
 
-        // Real-world VR Dimensions (Meters)
-        const NODE_RADIUS = 0.045;
-        const LINK_RADIUS = 0.005;
+        const NODE_RADIUS = 0.045; // 4.5 cm
+        const LINK_RADIUS = 0.005; // 5 mm
 
         const TEXTURE_CACHE = new Map();
         const MATERIAL_CACHE = new Map();
@@ -144,12 +410,13 @@
             canvas.width = 128;
             canvas.height = 128;
             const ctx = canvas.getContext('2d');
-            
             ctx.clearRect(0, 0, 128, 128);
             ctx.fillStyle = color;
-            ctx.font = 'bold 88px monospace';
+            ctx.font = 'bold 84px "Courier New", monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 12;
             ctx.fillText(number.toString(), 64, 64);
 
             const tex = new THREE.CanvasTexture(canvas);
@@ -177,48 +444,59 @@
         function createNumberSprite(number, color = '#ffffff') {
             const mat = getNumberMaterial(number, color);
             const sprite = new THREE.Sprite(mat);
-            sprite.scale.set(NODE_RADIUS * 1.55, NODE_RADIUS * 1.55, 1);
+            sprite.scale.set(NODE_RADIUS * 1.6, NODE_RADIUS * 1.6, 1);
             return sprite;
         }
 
         /* -------------------------------------------------------------
-           3. WebXR Game Engine & Dual Graph Generators
+           3. Unified WebXR + 2D Engine
         ------------------------------------------------------------- */
-        class MinesweeperVR {
+        class MinesweeperApp {
             constructor() {
                 this.nodes = [];
                 this.links = [];
+                this.particles = [];
                 this.inGame = true;
                 this.firstClick = true;
                 this.flagMode = false;
                 this.hoveredNode = null;
-                this.genAlgorithm = 'tree'; // 'tree' or 'poisson'
+                this.hoveredVRButton = null;
 
-                // VR Sized Graph Configuration (Dimensions in meters)
-                this.config = {
-                    tree: {
-                        maxNodes: 38,
-                        levels: 3,
-                        branches: 3,
-                        linkLength: 0.16,
-                        minNodeDist: 0.12,
-                        maxSecDist: 0.22,
-                        mines: 7
+                // 4 Generation algorithms & 4 Difficulty Presets
+                this.genAlgorithm = 'tree'; // 'tree', 'poisson-uniform', 'poisson-seq', 'poisson-biased'
+                this.currentDiff = 'easy';   // 'easy', 'medium', 'hard', 'insane'
+
+                // Real-world meter coordinates tuned for Quest field-of-reach
+                this.difficulties = {
+                    easy: {
+                        mines: 4,
+                        tree: { maxNodes: 24, levels: 2, branches: 3, linkLength: 0.16, minNodeDist: 0.12, maxSecDist: 0.23 },
+                        poisson: { maxNodes: 24, radius: 0.14, boxSize: 0.55, connMult: 1.6 }
                     },
-                    poisson: {
-                        maxNodes: 36,
-                        radius: 0.13,
-                        boxSize: 0.65,
-                        connectionMultiplier: 1.6,
-                        mines: 7
+                    medium: {
+                        mines: 12,
+                        tree: { maxNodes: 48, levels: 3, branches: 3, linkLength: 0.15, minNodeDist: 0.11, maxSecDist: 0.22 },
+                        poisson: { maxNodes: 48, radius: 0.13, boxSize: 0.68, connMult: 1.6 }
+                    },
+                    hard: {
+                        mines: 28,
+                        tree: { maxNodes: 95, levels: 4, branches: 3, linkLength: 0.14, minNodeDist: 0.10, maxSecDist: 0.21 },
+                        poisson: { maxNodes: 95, radius: 0.12, boxSize: 0.82, connMult: 1.55 }
+                    },
+                    insane: {
+                        mines: 55,
+                        tree: { maxNodes: 160, levels: 5, branches: 3, linkLength: 0.13, minNodeDist: 0.09, maxSecDist: 0.20 },
+                        poisson: { maxNodes: 160, radius: 0.11, boxSize: 0.98, connMult: 1.55 }
                     }
                 };
 
-                // World manipulation state
+                // VR State
                 this.grabbedBy = [];
                 this.previousControllerMatrix = new THREE.Matrix4();
+                this.vrUIPage = 'hud'; // 'hud', 'gen', 'diff', 'tut', 'gameover'
+                this.endGameData = { title: 'MISSION FAILED', message: 'Core detonated.', color: '#ff2222' };
 
-                // Reusable pre-allocated math objects to eliminate runtime GC frame-drops
+                // Pre-allocated GC Math objects
                 this.camPos = new THREE.Vector3();
                 this.localDir = new THREE.Vector3();
                 this.tempVec = new THREE.Vector3();
@@ -228,18 +506,19 @@
 
                 this.initGraphics();
                 this.initWebXR();
-                this.initDesktopControls();
-                this.createSpatialHUD();
+                this.initSpatialPanel();
+                this.init2DUI();
+                this.initDesktopInteraction();
                 this.startNewGame();
             }
 
             initGraphics() {
                 this.canvas = document.getElementById('webgl-canvas');
                 this.scene = new THREE.Scene();
-                this.scene.background = new THREE.Color(0x040805);
+                this.scene.background = new THREE.Color(0x020603);
 
-                this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 100);
-                this.camera.position.set(0, 1.4, 0.9);
+                this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 120);
+                this.camera.position.set(0, 1.35, 0.95);
 
                 this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
                 this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -247,15 +526,18 @@
                 this.renderer.xr.enabled = true;
                 document.body.appendChild(VRButton.createButton(this.renderer));
 
-                this.scene.add(new THREE.AmbientLight(0xffffff, 0.9));
-                const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+                this.scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+                const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
                 dirLight.position.set(5, 10, 7);
                 this.scene.add(dirLight);
 
-                // Central interactive space pinned directly in front of the Quest user
+                // Central matrix anchor positioned directly at comfortable chest height
                 this.worldAnchor = new THREE.Group();
-                this.worldAnchor.position.set(0, 1.25, -0.65);
+                this.worldAnchor.position.set(0, 1.22, -0.65);
                 this.scene.add(this.worldAnchor);
+
+                this.graphGroup = new THREE.Group();
+                this.worldAnchor.add(this.graphGroup);
 
                 window.addEventListener('resize', () => {
                     this.camera.aspect = window.innerWidth / window.innerHeight;
@@ -287,15 +569,11 @@
                     this.scene.add(grip);
 
                     const hand = this.renderer.xr.getHand(i);
-                    hand.add(this.handModelFactory.createHandModel(hand, "mesh"));
+                    hand.add(this.handModelFactory.createHandModel(hand, 'mesh'));
                     this.scene.add(hand);
 
-                    controller.addEventListener('connected', (e) => {
-                        controller.userData.gamepad = e.data.gamepad;
-                    });
-                    controller.addEventListener('disconnected', () => {
-                        controller.userData.gamepad = null;
-                    });
+                    controller.addEventListener('connected', (e) => { controller.userData.gamepad = e.data.gamepad; });
+                    controller.addEventListener('disconnected', () => { controller.userData.gamepad = null; });
 
                     controller.addEventListener('selectstart', () => this.onXRTriggerDown(controller));
                     controller.addEventListener('squeezestart', () => this.onXRGripStart(controller));
@@ -306,113 +584,270 @@
                 }
             }
 
-            createSpatialHUD() {
+            /* -------------------------------------------------------------
+               4. Interactive 3D Spatial Terminal (In-VR UI Screen)
+            ------------------------------------------------------------- */
+            initSpatialPanel() {
                 this.hudCanvas = document.createElement('canvas');
-                this.hudCanvas.width = 512; 
-                this.hudCanvas.height = 160;
+                this.hudCanvas.width = 1024;
+                this.hudCanvas.height = 420;
                 this.hudCtx = this.hudCanvas.getContext('2d');
 
                 this.hudTexture = new THREE.CanvasTexture(this.hudCanvas);
-                this.hudTexture.generateMipmaps = false;
                 this.hudTexture.minFilter = THREE.LinearFilter;
+                this.hudTexture.generateMipmaps = false;
 
-                const hudGeo = new THREE.PlaneGeometry(0.55, 0.17);
-                const hudMat = new THREE.MeshBasicMaterial({ map: this.hudTexture, transparent: true });
+                const hudGeo = new THREE.PlaneGeometry(0.72, 0.30);
+                const hudMat = new THREE.MeshBasicMaterial({ map: this.hudTexture, transparent: true, side: THREE.DoubleSide });
 
                 this.hudMesh = new THREE.Mesh(hudGeo, hudMat);
-                this.hudMesh.position.set(0, 0.42, 0);
+                this.hudMesh.position.set(0, 0.48, 0);
                 this.worldAnchor.add(this.hudMesh);
+
+                this.virtualButtons = [];
+                this.renderSpatialUI();
             }
 
-            updateHUD() {
-                const curMines = this.getCurrentMineCount();
-                let remaining = curMines;
-                let unrevealed = 0;
+            registerVJButton(id, x, y, w, h, label, active = false, sub = '') {
+                this.virtualButtons.push({ id, x, y, w, h, label, active, sub });
+                const ctx = this.hudCtx;
+                ctx.fillStyle = active ? '#00ff66' : 'rgba(0, 20, 10, 0.9)';
+                ctx.strokeStyle = '#00ff66';
+                ctx.lineWidth = 3;
+                ctx.fillRect(x, y, w, h);
+                ctx.strokeRect(x, y, w, h);
+
+                ctx.fillStyle = active ? '#000000' : '#00ff66';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                if (sub) {
+                    ctx.font = 'bold 24px monospace';
+                    ctx.fillText(label, x + w / 2, y + h / 2 - 10);
+                    ctx.font = '16px monospace';
+                    ctx.fillStyle = active ? '#111111' : '#88ffaa';
+                    ctx.fillText(sub, x + w / 2, y + h / 2 + 14);
+                } else {
+                    ctx.font = 'bold 24px monospace';
+                    ctx.fillText(label, x + w / 2, y + h / 2);
+                }
+            }
+
+            renderSpatialUI() {
+                const ctx = this.hudCtx;
+                ctx.clearRect(0, 0, 1024, 420);
+
+                ctx.fillStyle = 'rgba(2, 14, 6, 0.94)';
+                ctx.fillRect(0, 0, 1024, 420);
+                ctx.strokeStyle = '#00ff66';
+                ctx.lineWidth = 6;
+                ctx.strokeRect(6, 6, 1012, 408);
+
+                this.virtualButtons = [];
+                const curMines = this.difficulties[this.currentDiff].mines;
+                let flagged = 0, unrevealed = 0;
                 for (let n of this.nodes) {
-                    if (n.isFlagged) remaining--;
+                    if (n.isFlagged) flagged++;
                     if (!n.isRevealed) unrevealed++;
                 }
+                const leftMines = Math.max(0, curMines - flagged);
 
-                // 2D Web HUD
-                document.getElementById('hud-mines').textContent = Math.max(0, remaining);
-                document.getElementById('hud-nodes').textContent = unrevealed;
-                document.getElementById('hud-gen').textContent = this.genAlgorithm === 'poisson' ? 'Poisson' : 'Tree';
-                document.getElementById('hud-mode').textContent = this.flagMode ? '🚩 Flag' : '⛏️ Reveal';
-                document.getElementById('btn-toggle-gen').textContent = `Gen: ${this.genAlgorithm === 'poisson' ? 'Poisson' : 'Tree'}`;
+                if (this.vrUIPage === 'hud') {
+                    ctx.fillStyle = '#00ff66';
+                    ctx.font = 'bold 28px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`MINES: ${leftMines} | UNREVEALED: ${unrevealed} | MODE: ${this.flagMode ? 'FLAG [🚩]' : 'REVEAL [⛏️]'}`, 512, 42);
 
-                // In-World 3D Spatial Canvas
-                this.hudCtx.fillStyle = 'rgba(5, 20, 10, 0.88)';
-                this.hudCtx.fillRect(0, 0, 512, 160);
-                this.hudCtx.strokeStyle = '#00ff66';
-                this.hudCtx.lineWidth = 6;
-                this.hudCtx.strokeRect(4, 4, 504, 152);
+                    const genLabels = { 'tree': 'Tree', 'poisson-uniform': 'P-Uniform', 'poisson-seq': 'P-Sequential', 'poisson-biased': 'P-Biased' };
+                    this.registerVJButton('toggle-tool', 40, 80, 450, 70, this.flagMode ? '🚩 TOOL: FLAGGING' : '⛏️ TOOL: REVEALING', this.flagMode);
+                    this.registerVJButton('open-gen', 534, 80, 450, 70, `GEN: ${genLabels[this.genAlgorithm]}`, false);
+                    this.registerVJButton('open-diff', 40, 175, 450, 70, `DIFFICULTY: ${this.currentDiff.toUpperCase()}`, false);
+                    this.registerVJButton('open-tut', 534, 175, 450, 70, '3D RULES / TUTORIAL', false);
+                    this.registerVJButton('new-game', 40, 270, 944, 90, '⚡ RE-GENERATE / NEW GAME ⚡', true);
+                } else if (this.vrUIPage === 'gen') {
+                    ctx.fillStyle = '#00ff66';
+                    ctx.font = 'bold 30px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('SELECT GENERATION ALGORITHM', 512, 42);
 
-                this.hudCtx.fillStyle = '#00ff66';
-                this.hudCtx.font = 'bold 32px monospace';
-                this.hudCtx.textAlign = 'center';
-                this.hudCtx.fillText(`MINES: ${Math.max(0, remaining)} | LEFT: ${unrevealed}`, 256, 45);
+                    this.registerVJButton('set-gen-tree', 40, 75, 450, 85, 'TREE BRANCHING', this.genAlgorithm === 'tree', 'Recursive Branching');
+                    this.registerVJButton('set-gen-p-uni', 534, 75, 450, 85, 'POISSON UNIFORM', this.genAlgorithm === 'poisson-uniform', 'Bridson 3D Uniform');
+                    this.registerVJButton('set-gen-p-seq', 40, 185, 450, 85, 'POISSON SEQUENTIAL', this.genAlgorithm === 'poisson-seq', 'Expanding Radial FIFO');
+                    this.registerVJButton('set-gen-p-bias', 534, 185, 450, 85, 'POISSON BIASED', this.genAlgorithm === 'poisson-biased', 'Frontier SwapBack Snake');
+                    this.registerVJButton('close-page', 40, 300, 944, 75, 'BACK TO DASHBOARD', false);
+                } else if (this.vrUIPage === 'diff') {
+                    ctx.fillStyle = '#00ff66';
+                    ctx.font = 'bold 30px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('SELECT DIFFICULTY PRESET', 512, 42);
 
-                this.hudCtx.font = '24px monospace';
-                this.hudCtx.fillStyle = '#88ffaa';
-                this.hudCtx.fillText(`ALGO: ${this.genAlgorithm.toUpperCase()} GRAPH`, 256, 88);
+                    this.registerVJButton('set-diff-easy', 40, 75, 450, 85, 'EASY', this.currentDiff === 'easy', '4 Mines (~24 Nodes)');
+                    this.registerVJButton('set-diff-medium', 534, 75, 450, 85, 'MEDIUM', this.currentDiff === 'medium', '12 Mines (~48 Nodes)');
+                    this.registerVJButton('set-diff-hard', 40, 185, 450, 85, 'HARD', this.currentDiff === 'hard', '28 Mines (~95 Nodes)');
+                    this.registerVJButton('set-diff-insane', 534, 185, 450, 85, 'INSANE', this.currentDiff === 'insane', '55 Mines (~160 Nodes)');
+                    this.registerVJButton('close-page', 40, 300, 944, 75, 'BACK TO DASHBOARD', false);
+                } else if (this.vrUIPage === 'tut') {
+                    ctx.fillStyle = '#00ff66';
+                    ctx.font = 'bold 26px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('3D GRAPH MINESWEEPER PROTOCOL', 512, 38);
 
-                this.hudCtx.fillStyle = this.flagMode ? '#ff3333' : '#00ff66';
-                this.hudCtx.fillText(`TOOL: ${this.flagMode ? 'FLAGGING [🚩]' : 'REVEALING [⛏️]'}`, 256, 130);
+                    ctx.font = '20px monospace';
+                    ctx.fillStyle = '#88ffaa';
+                    ctx.textAlign = 'left';
+                    ctx.fillText('• BLUE NODES: Revealed safe sector showing connected mine counts.', 40, 85);
+                    ctx.fillText('• YELLOW NODES: Unrevealed neighbors exposing spatial counts early!', 40, 125);
+                    ctx.fillText('• TRIGGER: Reveal / Flag sector based on active tool.', 40, 165);
+                    ctx.fillText('• GRIP SQUEEZE: Grab, rotate & pull matrix freely in 3D space.', 40, 205);
+                    ctx.fillText('• HAND TRACKING: Poke node directly with index finger tip.', 40, 245);
+
+                    this.registerVJButton('close-page', 40, 295, 944, 80, 'RETURN TO SYSTEM', true);
+                } else if (this.vrUIPage === 'gameover') {
+                    ctx.fillStyle = this.endGameData.color;
+                    ctx.font = 'bold 36px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(this.endGameData.title, 512, 70);
+
+                    ctx.font = '24px monospace';
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(this.endGameData.message, 512, 135);
+
+                    this.registerVJButton('close-page', 60, 210, 420, 120, 'INSPECT BOARD', false);
+                    this.registerVJButton('new-game', 544, 210, 420, 120, 'PLAY AGAIN', true);
+                }
 
                 this.hudTexture.needsUpdate = true;
             }
 
-            getCurrentMineCount() {
-                return this.genAlgorithm === 'poisson' ? this.config.poisson.mines : this.config.tree.mines;
+            handleSpatialUIPress(buttonId) {
+                sfx.click();
+                if (buttonId === 'toggle-tool') {
+                    this.setFlagMode(!this.flagMode);
+                } else if (buttonId === 'open-gen') {
+                    this.vrUIPage = 'gen';
+                } else if (buttonId === 'open-diff') {
+                    this.vrUIPage = 'diff';
+                } else if (buttonId === 'open-tut') {
+                    this.vrUIPage = 'tut';
+                } else if (buttonId === 'close-page') {
+                    this.vrUIPage = 'hud';
+                } else if (buttonId === 'new-game') {
+                    this.vrUIPage = 'hud';
+                    this.startNewGame();
+                } else if (buttonId.startsWith('set-gen-')) {
+                    const map = {
+                        'set-gen-tree': 'tree',
+                        'set-gen-p-uni': 'poisson-uniform',
+                        'set-gen-p-seq': 'poisson-seq',
+                        'set-gen-p-bias': 'poisson-biased'
+                    };
+                    this.genAlgorithm = map[buttonId];
+                    this.vrUIPage = 'hud';
+                    this.startNewGame();
+                } else if (buttonId.startsWith('set-diff-')) {
+                    this.currentDiff = buttonId.replace('set-diff-', '');
+                    this.vrUIPage = 'hud';
+                    this.startNewGame();
+                }
+                this.renderSpatialUI();
+                this.update2DHUD();
             }
 
+            /* -------------------------------------------------------------
+               5. Breadth-First Connectivity & 4 Generation Algorithms
+            ------------------------------------------------------------- */
             clearGraph() {
-                while (this.worldAnchor.children.length > 0) {
-                    const obj = this.worldAnchor.children[0];
-                    if (obj === this.hudMesh) {
-                        this.worldAnchor.remove(obj);
-                    } else {
-                        this.worldAnchor.remove(obj);
-                        if (obj.geometry && obj.geometry !== this.sharedSphereGeo) obj.geometry.dispose();
-                    }
+                while (this.graphGroup.children.length > 0) {
+                    const obj = this.graphGroup.children[0];
+                    this.graphGroup.remove(obj);
+                    if (obj.geometry && obj.geometry !== this.sharedSphereGeo) obj.geometry.dispose();
                 }
-                this.worldAnchor.add(this.hudMesh);
                 this.nodes = [];
                 this.links = [];
             }
 
-            /* -------------------------------------------------------------
-               Algorithm A: Recursive Tree Branching (Scaled for VR)
-            ------------------------------------------------------------- */
+            ensureCompleteConnectivity() {
+                if (this.nodes.length <= 1) return;
+
+                const getComponents = () => {
+                    const visited = new Uint8Array(this.nodes.length);
+                    const comps = [];
+                    for (let i = 0; i < this.nodes.length; i++) {
+                        if (visited[i]) continue;
+                        const comp = [];
+                        const q = [i];
+                        visited[i] = 1;
+                        while (q.length > 0) {
+                            const cur = q.shift();
+                            comp.push(cur);
+                            for (let nb of this.nodes[cur].neighbors) {
+                                if (!visited[nb]) {
+                                    visited[nb] = 1;
+                                    q.push(nb);
+                                }
+                            }
+                        }
+                        comps.push(comp);
+                    }
+                    return comps;
+                };
+
+                let components = getComponents();
+                while (components.length > 1) {
+                    components.sort((a, b) => b.length - a.length);
+                    const mainComp = components[0];
+                    const island = components[1];
+
+                    let bestDistSq = Infinity;
+                    let from = -1, to = -1;
+
+                    for (let islId of island) {
+                        const pIsland = this.nodes[islId].pos;
+                        for (let mainId of mainComp) {
+                            const dSq = pIsland.distanceToSquared(this.nodes[mainId].pos);
+                            if (dSq < bestDistSq) {
+                                bestDistSq = dSq;
+                                from = islId;
+                                to = mainId;
+                            }
+                        }
+                    }
+
+                    if (from !== -1 && to !== -1) {
+                        this.addLink(from, to);
+                    }
+                    components = getComponents();
+                }
+            }
+
             generateTreeGraph() {
                 this.clearGraph();
-                const cfg = this.config.tree;
+                const cfg = this.difficulties[this.currentDiff].tree;
 
                 this.addNode(new THREE.Vector3(0, 0, 0));
                 const queue = [{ id: 0, level: 0 }];
 
                 while (queue.length > 0 && this.nodes.length < cfg.maxNodes) {
-                    const curr = queue.shift();
-                    if (curr.level >= cfg.levels) continue;
+                    const cur = queue.shift();
+                    if (cur.level >= cfg.levels) continue;
 
                     for (let b = 0; b < cfg.branches; b++) {
                         if (this.nodes.length >= cfg.maxNodes) break;
 
                         let found = false;
-                        const candPos = new THREE.Vector3();
-
-                        for (let attempts = 0; attempts < 35; attempts++) {
-                            const randDir = new THREE.Vector3(
+                        const cand = new THREE.Vector3();
+                        for (let a = 0; a < 35; a++) {
+                            const dir = new THREE.Vector3(
                                 (Math.random() - 0.5) * 2,
                                 (Math.random() - 0.5) * 2,
                                 (Math.random() - 0.5) * 2
                             ).normalize();
 
-                            candPos.copy(this.nodes[curr.id].pos).addScaledVector(randDir, cfg.linkLength);
+                            cand.copy(this.nodes[cur.id].pos).addScaledVector(dir, cfg.linkLength);
 
                             let tooClose = false;
                             for (let n of this.nodes) {
-                                if (candPos.distanceTo(n.pos) < cfg.minNodeDist) {
+                                if (cand.distanceTo(n.pos) < cfg.minNodeDist) {
                                     tooClose = true;
                                     break;
                                 }
@@ -424,40 +859,39 @@
                         }
 
                         if (found) {
-                            const newId = this.addNode(candPos);
-                            this.addConnection(curr.id, newId);
-                            queue.push({ id: newId, level: curr.level + 1 });
+                            const newId = this.addNode(cand);
+                            this.addLink(cur.id, newId);
+                            queue.push({ id: newId, level: cur.level + 1 });
                         }
                     }
                 }
 
-                // Add secondary cyclic connections for web topology
+                // Cross connections
                 for (let i = 0; i < this.nodes.length; i++) {
                     for (let j = i + 1; j < this.nodes.length; j++) {
-                        const dist = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
-                        if (dist <= cfg.maxSecDist && dist >= cfg.minNodeDist * 0.8) {
+                        const d = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
+                        if (d <= cfg.maxSecDist && d >= cfg.minNodeDist * 0.8) {
                             if (this.nodes[i].neighbors.length < 5 && this.nodes[j].neighbors.length < 5) {
                                 if (!this.nodes[i].neighbors.includes(j)) {
-                                    this.addConnection(i, j);
+                                    this.addLink(i, j);
                                 }
                             }
                         }
                     }
                 }
+
+                this.ensureCompleteConnectivity();
             }
 
-            /* -------------------------------------------------------------
-               Algorithm B: 3D Poisson Disk Sampling (Scaled for VR)
-            ------------------------------------------------------------- */
-            generatePoissonGraph() {
+            generatePoissonGraph(variant) {
                 this.clearGraph();
-                const cfg = this.config.poisson;
+                const cfg = this.difficulties[this.currentDiff].poisson;
                 const r = cfg.radius;
                 const sqRadius = r * r;
                 const maxPoints = cfg.maxNodes;
-                const k = 30;
                 const boxSize = cfg.boxSize;
                 const halfBox = boxSize / 2;
+                const k = 30;
 
                 const cellSize = r / Math.sqrt(3);
                 const gridDim = Math.ceil(boxSize / cellSize);
@@ -479,24 +913,19 @@
                 const isValid = (candidate) => {
                     if (candidate.x < -halfBox || candidate.x >= halfBox ||
                         candidate.y < -halfBox || candidate.y >= halfBox ||
-                        candidate.z < -halfBox || candidate.z >= halfBox) {
-                        return false;
-                    }
+                        candidate.z < -halfBox || candidate.z >= halfBox) return false;
 
                     const cx = Math.floor((candidate.x + halfBox) / cellSize);
                     const cy = Math.floor((candidate.y + halfBox) / cellSize);
                     const cz = Math.floor((candidate.z + halfBox) / cellSize);
 
-                    const startX = Math.max(0, cx - 2);
-                    const endX = Math.min(gridDim - 1, cx + 2);
-                    const startY = Math.max(0, cy - 2);
-                    const endY = Math.min(gridDim - 1, cy + 2);
-                    const startZ = Math.max(0, cz - 2);
-                    const endZ = Math.min(gridDim - 1, cz + 2);
+                    const sx = Math.max(0, cx - 2), ex = Math.min(gridDim - 1, cx + 2);
+                    const sy = Math.max(0, cy - 2), ey = Math.min(gridDim - 1, cy + 2);
+                    const sz = Math.max(0, cz - 2), ez = Math.min(gridDim - 1, cz + 2);
 
-                    for (let x = startX; x <= endX; x++) {
-                        for (let y = startY; y <= endY; y++) {
-                            for (let z = startZ; z <= endZ; z++) {
+                    for (let x = sx; x <= ex; x++) {
+                        for (let y = sy; y <= ey; y++) {
+                            for (let z = sz; z <= ez; z++) {
                                 const ptIdx = grid[getGridIdx(x, y, z)];
                                 if (ptIdx !== -1) {
                                     if (candidate.distanceToSquared(points[ptIdx]) < sqRadius) return false;
@@ -507,11 +936,23 @@
                     return true;
                 };
 
-                while (spawnPoints.length > 0 && points.length < maxPoints) {
-                    const spawnIndex = Math.floor(Math.random() * spawnPoints.length);
-                    const spawnCentre = spawnPoints[spawnIndex];
-                    let accepted = false;
+                let lastActive = 0;
 
+                while (points.length < maxPoints) {
+                    let spawnCentre, spawnIdx = -1;
+                    if (variant === 'poisson-uniform') {
+                        if (spawnPoints.length === 0) break;
+                        spawnIdx = Math.floor(Math.random() * spawnPoints.length);
+                        spawnCentre = spawnPoints[spawnIdx];
+                    } else if (variant === 'poisson-seq') {
+                        if (lastActive >= points.length) break;
+                        spawnCentre = points[lastActive];
+                    } else if (variant === 'poisson-biased') {
+                        if (spawnPoints.length === 0) break;
+                        spawnCentre = spawnPoints[0];
+                    }
+
+                    let accepted = false;
                     for (let i = 0; i < k; i++) {
                         const theta = Math.random() * Math.PI * 2;
                         const phi = Math.acos(2 * Math.random() - 1);
@@ -538,34 +979,39 @@
                         }
                     }
 
-                    if (!accepted) spawnPoints.splice(spawnIndex, 1);
+                    if (!accepted) {
+                        if (variant === 'poisson-uniform') {
+                            spawnPoints.splice(spawnIdx, 1);
+                        } else if (variant === 'poisson-seq') {
+                            lastActive++;
+                        } else if (variant === 'poisson-biased') {
+                            const last = spawnPoints.pop();
+                            if (spawnPoints.length > 0) spawnPoints[0] = last;
+                        }
+                    }
                 }
 
                 points.forEach(pt => this.addNode(pt));
 
-                const connectionRadius = r * cfg.connectionMultiplier;
+                const connRad = r * cfg.connMult;
                 for (let i = 0; i < this.nodes.length; i++) {
                     for (let j = i + 1; j < this.nodes.length; j++) {
-                        const dist = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
-                        if (dist <= connectionRadius) {
+                        if (this.nodes[i].pos.distanceTo(this.nodes[j].pos) <= connRad) {
                             if (this.nodes[i].neighbors.length < 5 && this.nodes[j].neighbors.length < 5) {
-                                this.addConnection(i, j);
+                                this.addLink(i, j);
                             }
                         }
                     }
                 }
 
-                // Prevent isolated island nodes
-                for (let i = 0; i < this.nodes.length; i++) {
-                    if (this.nodes[i].neighbors.length === 0) {
-                        let closest = -1, minD = Infinity;
-                        for (let j = 0; j < this.nodes.length; j++) {
-                            if (i === j) continue;
-                            const d = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
-                            if (d < minD) { minD = d; closest = j; }
-                        }
-                        if (closest !== -1) this.addConnection(i, closest);
-                    }
+                this.ensureCompleteConnectivity();
+            }
+
+            buildGraph() {
+                if (this.genAlgorithm === 'tree') {
+                    this.generateTreeGraph();
+                } else {
+                    this.generatePoissonGraph(this.genAlgorithm);
                 }
             }
 
@@ -574,12 +1020,12 @@
                 const mat = new THREE.MeshStandardMaterial({
                     color: COLORS.NODE_UNREVEALED,
                     roughness: 0.35,
-                    metalness: 0.15
+                    metalness: 0.2
                 });
                 const mesh = new THREE.Mesh(this.sharedSphereGeo, mat);
                 mesh.position.copy(pos);
                 mesh.userData = { nodeId: id };
-                this.worldAnchor.add(mesh);
+                this.graphGroup.add(mesh);
 
                 this.nodes.push({
                     id, pos: pos.clone(), mesh, sprite: null, neighbors: [], links: [],
@@ -588,9 +1034,10 @@
                 return id;
             }
 
-            addConnection(a, b) {
-                const p1 = this.nodes[a].pos;
-                const p2 = this.nodes[b].pos;
+            addLink(nodeAId, nodeBId) {
+                if (this.nodes[nodeAId].neighbors.includes(nodeBId)) return;
+                const p1 = this.nodes[nodeAId].pos;
+                const p2 = this.nodes[nodeBId].pos;
                 const dir = new THREE.Vector3().subVectors(p2, p1);
                 const len = dir.length();
 
@@ -598,54 +1045,36 @@
                 geom.translate(0, len / 2, 0);
                 geom.rotateX(Math.PI / 2);
 
-                const mat = new THREE.MeshStandardMaterial({ color: COLORS.LINK_DEFAULT, roughness: 0.5 });
-                const mesh = new THREE.Mesh(geom, mat);
+                const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: COLORS.LINK_DEFAULT, roughness: 0.5 }));
                 mesh.position.copy(p1);
                 mesh.lookAt(p2);
-                this.worldAnchor.add(mesh);
+                this.graphGroup.add(mesh);
 
                 const linkId = this.links.length;
-                this.links.push({ id: linkId, a, b, mesh });
-                this.nodes[a].neighbors.push(b);
-                this.nodes[a].links.push(linkId);
-                this.nodes[b].neighbors.push(a);
-                this.nodes[b].links.push(linkId);
+                this.links.push({ id: linkId, a: nodeAId, b: nodeBId, mesh });
+                this.nodes[nodeAId].neighbors.push(nodeBId);
+                this.nodes[nodeAId].links.push(linkId);
+                this.nodes[nodeBId].neighbors.push(nodeAId);
+                this.nodes[nodeBId].links.push(linkId);
             }
 
-            buildNetwork() {
-                if (this.genAlgorithm === 'poisson') {
-                    this.generatePoissonGraph();
-                } else {
-                    this.generateTreeGraph();
-                }
-            }
-
-            updateLinksColor() {
-                for (let link of this.links) {
-                    const na = this.nodes[link.a];
-                    const nb = this.nodes[link.b];
-
-                    if (na.isFlagged || nb.isFlagged) {
-                        link.mesh.material.color.setHex(COLORS.LINK_MINE);
-                    } else if (na.isRevealed && nb.isRevealed) {
-                        link.mesh.material.color.setHex(COLORS.LINK_SAFE);
-                    } else {
-                        link.mesh.material.color.setHex(COLORS.LINK_DEFAULT);
-                    }
-                }
-            }
-
-            plantMines(startNodeId) {
-                const totalMines = this.getCurrentMineCount();
+            /* -------------------------------------------------------------
+               6. Gameplay Engine & Board Resolution
+            ------------------------------------------------------------- */
+            plantMines(safeId) {
+                const cfg = this.difficulties[this.currentDiff];
+                const totalMines = Math.min(cfg.mines, Math.max(1, this.nodes.length - 2));
                 let planted = 0;
+
                 while (planted < totalMines) {
                     const idx = Math.floor(Math.random() * this.nodes.length);
-                    if (idx === startNodeId || this.nodes[startNodeId].neighbors.includes(idx)) continue;
+                    if (idx === safeId || this.nodes[safeId].neighbors.includes(idx)) continue;
                     if (!this.nodes[idx].isMine) {
                         this.nodes[idx].isMine = true;
                         planted++;
                     }
                 }
+
                 for (let n of this.nodes) {
                     n.adjMines = n.neighbors.filter(nb => this.nodes[nb].isMine).length;
                 }
@@ -661,10 +1090,7 @@
                 }
 
                 if (node.isMine) {
-                    this.inGame = false;
-                    sfx.explode();
-                    node.mesh.material.color.setHex(COLORS.NODE_MINE);
-                    this.revealBoardOnLoss();
+                    this.triggerGameOver(id);
                     return;
                 }
 
@@ -673,6 +1099,7 @@
                 sfx.reveal();
 
                 this.attachNumberSprite(node, '#ffffff');
+                this.updateLinksColor();
 
                 for (let nbId of node.neighbors) {
                     const nb = this.nodes[nbId];
@@ -689,9 +1116,9 @@
                     }
                 }
 
-                this.updateLinksColor();
-                this.updateHUD();
-                this.checkWin();
+                this.update2DHUD();
+                this.renderSpatialUI();
+                this.checkWinCondition();
             }
 
             toggleFlag(id) {
@@ -708,10 +1135,11 @@
                     node.mesh.material.color.setHex(node.isHinted ? COLORS.NODE_HINT : COLORS.NODE_UNREVEALED);
                     if (node.sprite) node.sprite.visible = true;
                 }
-                
+
                 this.updateLinksColor();
-                this.updateHUD();
-                this.checkWin();
+                this.update2DHUD();
+                this.renderSpatialUI();
+                this.checkWinCondition();
             }
 
             attachNumberSprite(node, color) {
@@ -725,22 +1153,16 @@
                 this.orientSprite(node);
             }
 
-            getActiveCamera() {
-                return (this.renderer.xr && this.renderer.xr.isPresenting) 
-                    ? this.renderer.xr.getCamera() 
-                    : this.camera;
-            }
-
             orientSprite(node) {
                 if (!node.sprite || !node.sprite.visible) return;
-                const cam = this.getActiveCamera();
+                const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
                 cam.getWorldPosition(this.camPos);
 
                 this.localDir.copy(this.camPos);
                 node.mesh.worldToLocal(this.localDir);
 
                 if (this.localDir.lengthSq() > 0.0001) {
-                    this.localDir.normalize().multiplyScalar(NODE_RADIUS + 0.008);
+                    this.localDir.normalize().multiplyScalar(NODE_RADIUS + 0.006);
                     node.sprite.position.copy(this.localDir);
                 }
             }
@@ -751,7 +1173,79 @@
                 }
             }
 
-            revealBoardOnLoss() {
+            updateLinksColor() {
+                for (let link of this.links) {
+                    const na = this.nodes[link.a];
+                    const nb = this.nodes[link.b];
+                    if (na.isFlagged || nb.isFlagged) {
+                        link.mesh.material.color.setHex(COLORS.LINK_MINE);
+                    } else if (na.isRevealed && nb.isRevealed) {
+                        link.mesh.material.color.setHex(COLORS.LINK_SAFE);
+                    } else {
+                        link.mesh.material.color.setHex(COLORS.LINK_DEFAULT);
+                    }
+                }
+            }
+
+            checkWinCondition() {
+                const cfg = this.difficulties[this.currentDiff];
+                let revealedCount = 0, flaggedCorrect = 0;
+
+                for (let n of this.nodes) {
+                    if (n.isRevealed && !n.isMine) revealedCount++;
+                    if (n.isFlagged && n.isMine) flaggedCorrect++;
+                }
+
+                const safeTotal = this.nodes.length - cfg.mines;
+                if (revealedCount >= safeTotal || flaggedCorrect === cfg.mines) {
+                    this.inGame = false;
+                    sfx.win();
+
+                    this.endGameData = { title: 'MISSION VICTORY', message: 'All cybernetic cores secured!', color: '#00ff66' };
+                    document.getElementById('endgame-title').textContent = this.endGameData.title;
+                    document.getElementById('endgame-title').style.color = this.endGameData.color;
+                    document.getElementById('endgame-msg').textContent = this.endGameData.message;
+                    document.getElementById('modal-gameover').style.display = 'flex';
+
+                    this.vrUIPage = 'gameover';
+                    this.renderSpatialUI();
+                }
+            }
+
+            triggerGameOver(detonatedId) {
+                this.inGame = false;
+                sfx.explode();
+
+                const detonatedNode = this.nodes[detonatedId];
+                detonatedNode.mesh.material.color.setHex(COLORS.NODE_MINE);
+                this.createExplosionParticles(detonatedNode.mesh.getWorldPosition(new THREE.Vector3()), 0xff2200);
+
+                let delay = 150, count = 0;
+                this.nodes.forEach(n => {
+                    if (n.isMine && n.id !== detonatedId) {
+                        count++;
+                        setTimeout(() => {
+                            n.mesh.material.color.setHex(COLORS.NODE_MINE);
+                            this.createExplosionParticles(n.mesh.getWorldPosition(new THREE.Vector3()), 0xff0044);
+                            sfx.playTone(140 + Math.random() * 200, 'sawtooth', 0.08, 0.08);
+                        }, count * delay);
+                    }
+                });
+
+                setTimeout(() => {
+                    this.revealFullBoard();
+                    this.endGameData = { title: 'MISSION FAILED', message: 'Mine core detonation triggered!', color: '#ff2222' };
+                    document.getElementById('endgame-title').textContent = this.endGameData.title;
+                    document.getElementById('endgame-title').style.color = this.endGameData.color;
+                    document.getElementById('endgame-msg').textContent = this.endGameData.message;
+                    document.getElementById('modal-gameover').style.display = 'flex';
+
+                    this.vrUIPage = 'gameover';
+                    this.renderSpatialUI();
+                }, (count + 1) * delay + 200);
+            }
+
+            revealFullBoard() {
                 for (let n of this.nodes) {
                     if (n.isMine) {
                         n.mesh.material.color.setHex(COLORS.NODE_MINE);
@@ -761,8 +1255,7 @@
                     }
                 }
                 for (let l of this.links) {
-                    const na = this.nodes[l.a];
-                    const nb = this.nodes[l.b];
+                    const na = this.nodes[l.a], nb = this.nodes[l.b];
                     if (na.isMine || nb.isMine) {
                         l.mesh.material.color.setHex(COLORS.LINK_MINE);
                     } else {
@@ -771,22 +1264,73 @@
                 }
             }
 
-            checkWin() {
-                const totalMines = this.getCurrentMineCount();
-                let correctFlags = 0;
-                let safeRevealed = 0;
-                for (let n of this.nodes) {
-                    if (n.isFlagged && n.isMine) correctFlags++;
-                    if (n.isRevealed && !n.isMine) safeRevealed++;
+            /* -------------------------------------------------------------
+               7. Particle Systems (Explosions)
+            ------------------------------------------------------------- */
+            createExplosionParticles(worldPos, hex) {
+                const count = 35;
+                const pGeo = new THREE.BufferGeometry();
+                const pos = new Float32Array(count * 3);
+                const vels = [];
+
+                for (let i = 0; i < count; i++) {
+                    pos[i * 3] = worldPos.x;
+                    pos[i * 3 + 1] = worldPos.y;
+                    pos[i * 3 + 2] = worldPos.z;
+                    vels.push(new THREE.Vector3(
+                        (Math.random() - 0.5) * 1.5,
+                        (Math.random() - 0.5) * 1.5,
+                        (Math.random() - 0.5) * 1.5
+                    ));
                 }
-                if (safeRevealed === this.nodes.length - totalMines || correctFlags === totalMines) {
-                    this.inGame = false;
-                    sfx.win();
+
+                pGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                const pMat = new THREE.PointsMaterial({ color: hex, size: 0.02, transparent: true, opacity: 1 });
+                const pSys = new THREE.Points(pGeo, pMat);
+                this.scene.add(pSys);
+                this.particles.push({ mesh: pSys, vels, life: 1.0 });
+            }
+
+            updateParticles(dt) {
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.life -= dt * 1.8;
+                    p.mesh.material.opacity = p.life;
+                    const posAttr = p.mesh.geometry.attributes.position;
+                    for (let j = 0; j < p.vels.length; j++) {
+                        posAttr.setXYZ(
+                            j,
+                            posAttr.getX(j) + p.vels[j].x * dt,
+                            posAttr.getY(j) + p.vels[j].y * dt,
+                            posAttr.getZ(j) + p.vels[j].z * dt
+                        );
+                    }
+                    posAttr.needsUpdate = true;
+                    if (p.life <= 0) {
+                        this.scene.remove(p.mesh);
+                        p.mesh.geometry.dispose();
+                        p.mesh.material.dispose();
+                        this.particles.splice(i, 1);
+                    }
                 }
+            }
+
+            /* -------------------------------------------------------------
+               8. Interaction Handling: WebXR (Hands/Controllers) + Desktop
+            ------------------------------------------------------------- */
+            triggerHaptic(controller, intensity = 0.5, duration = 30) {
+                const gamepad = controller.userData?.gamepad;
+                try {
+                    if (gamepad?.hapticActuators?.[0]?.pulse) gamepad.hapticActuators[0].pulse(intensity, duration);
+                } catch (e) {}
             }
 
             onXRTriggerDown(controller) {
                 this.triggerHaptic(controller, 0.7, 40);
+                if (this.hoveredVRButton) {
+                    this.handleSpatialUIPress(this.hoveredVRButton.id);
+                    return;
+                }
                 if (this.hoveredNode) {
                     if (this.flagMode) this.toggleFlag(this.hoveredNode.id);
                     else this.revealNode(this.hoveredNode.id);
@@ -802,30 +1346,42 @@
                 this.grabbedBy = this.grabbedBy.filter(c => c !== controller);
             }
 
-            triggerHaptic(controller, intensity = 0.5, duration = 30) {
-                const gamepad = controller.userData?.gamepad;
-                try {
-                    if (gamepad?.hapticActuators?.[0]?.pulse) {
-                        gamepad.hapticActuators[0].pulse(intensity, duration);
-                    }
-                } catch(e) {}
-            }
-
             handleVRInteractions() {
-                let foundHover = null;
+                let foundHoverNode = null;
+                let foundHoverBtn = null;
                 const nodeMeshes = this.nodes.map(n => n.mesh);
+                const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
+                this.raycaster.camera = cam;
 
-                this.raycaster.camera = this.getActiveCamera();
-
+                // Controller Raycasting
                 for (let controller of this.controllers) {
                     this.workingMatrix.identity().extractRotation(controller.matrixWorld);
                     this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
                     this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.workingMatrix);
 
-                    const hits = this.raycaster.intersectObjects(nodeMeshes, false);
                     const laser = controller.getObjectByName('laser');
+
+                    // Check Spatial HUD UI first
+                    const hudHits = this.raycaster.intersectObject(this.hudMesh, false);
+                    if (hudHits.length > 0) {
+                        const uv = hudHits[0].uv;
+                        const canvasX = uv.x * 1024;
+                        const canvasY = (1 - uv.y) * 420;
+
+                        for (let btn of this.virtualButtons) {
+                            if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
+                                foundHoverBtn = btn;
+                                break;
+                            }
+                        }
+                        if (laser) laser.scale.z = hudHits[0].distance;
+                        break;
+                    }
+
+                    // Check Nodes
+                    const hits = this.raycaster.intersectObjects(nodeMeshes, false);
                     if (hits.length > 0) {
-                        foundHover = this.nodes[hits[0].object.userData.nodeId];
+                        foundHoverNode = this.nodes[hits[0].object.userData.nodeId];
                         if (laser) laser.scale.z = hits[0].distance;
                         break;
                     } else {
@@ -842,7 +1398,7 @@
                             for (let n of this.nodes) {
                                 const nWorld = n.mesh.getWorldPosition(this.tempNodePos);
                                 if (tipPos.distanceTo(nWorld) < NODE_RADIUS * 1.3) {
-                                    foundHover = n;
+                                    foundHoverNode = n;
                                     if (!n.isRevealed && !n.isFlagged) {
                                         this.revealNode(n.id);
                                     }
@@ -852,16 +1408,19 @@
                     }
                 }
 
-                if (this.hoveredNode !== foundHover) {
+                // Visual Scaling for Node Hover
+                if (this.hoveredNode !== foundHoverNode) {
                     if (this.hoveredNode) this.hoveredNode.mesh.scale.set(1, 1, 1);
-                    this.hoveredNode = foundHover;
+                    this.hoveredNode = foundHoverNode;
                     if (this.hoveredNode) {
                         this.hoveredNode.mesh.scale.set(1.3, 1.3, 1.3);
-                        this.triggerHaptic(this.controllers[0], 0.2, 15);
+                        this.triggerHaptic(this.controllers[0], 0.25, 15);
                     }
                 }
 
-                // 6DoF Field Manipulation via Grip Drag
+                this.hoveredVRButton = foundHoverBtn;
+
+                // 6DoF Field Manipulation via Grip Squeeze
                 if (this.grabbedBy.length === 1) {
                     const c = this.grabbedBy[0];
                     const delta = new THREE.Matrix4().copy(c.matrixWorld).multiply(this.previousControllerMatrix.invert());
@@ -870,20 +1429,39 @@
                 }
             }
 
-            initDesktopControls() {
+            initDesktopInteraction() {
                 this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-                this.controls.target.copy(this.worldAnchor.position);
+                this.controls.target.set(0, 1.25, -0.65);
                 this.controls.enableDamping = true;
 
                 const mouse = new THREE.Vector2();
                 const dRay = new THREE.Raycaster();
+                let downPos = new THREE.Vector2();
 
+                window.addEventListener('pointerdown', (e) => downPos.set(e.clientX, e.clientY));
                 window.addEventListener('pointerup', (e) => {
                     if (this.renderer.xr.isPresenting) return;
+                    if (downPos.distanceTo(new THREE.Vector2(e.clientX, e.clientY)) > 6) return;
+
                     mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
                     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
                     dRay.setFromCamera(mouse, this.camera);
 
+                    // Check Spatial HUD in Desktop Mode
+                    const hudHits = dRay.intersectObject(this.hudMesh, false);
+                    if (hudHits.length > 0) {
+                        const uv = hudHits[0].uv;
+                        const canvasX = uv.x * 1024;
+                        const canvasY = (1 - uv.y) * 420;
+                        for (let btn of this.virtualButtons) {
+                            if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
+                                this.handleSpatialUIPress(btn.id);
+                                return;
+                            }
+                        }
+                    }
+
+                    // Check Graph Nodes
                     const hits = dRay.intersectObjects(this.nodes.map(n => n.mesh), false);
                     if (hits.length > 0) {
                         const id = hits[0].object.userData.nodeId;
@@ -892,47 +1470,117 @@
                     }
                 });
 
-                document.getElementById('btn-desktop-toggle-flag').onclick = () => {
-                    this.flagMode = !this.flagMode;
-                    document.getElementById('btn-desktop-toggle-flag').classList.toggle('active', this.flagMode);
-                    this.updateHUD();
-                };
+                window.addEventListener('contextmenu', e => e.preventDefault());
+            }
 
-                document.getElementById('btn-toggle-gen').onclick = () => {
-                    this.genAlgorithm = this.genAlgorithm === 'tree' ? 'poisson' : 'tree';
+            /* -------------------------------------------------------------
+               9. 2D DOM UI & Modal Bindings
+            ------------------------------------------------------------- */
+            setFlagMode(val) {
+                this.flagMode = val;
+                document.getElementById('btn-mode-reveal').classList.toggle('active', !this.flagMode);
+                document.getElementById('btn-mode-flag').classList.toggle('active', this.flagMode);
+                this.update2DHUD();
+                this.renderSpatialUI();
+            }
+
+            init2DUI() {
+                document.getElementById('btn-mode-reveal').onclick = () => { sfx.click(); this.setFlagMode(false); };
+                document.getElementById('btn-mode-flag').onclick = () => { sfx.click(); this.setFlagMode(true); };
+                document.getElementById('btn-reset').onclick = () => { sfx.click(); this.startNewGame(); };
+
+                // Modals
+                const mGen = document.getElementById('modal-gen');
+                const mDiff = document.getElementById('modal-difficulty');
+                const mTut = document.getElementById('modal-tutorial');
+                const mOver = document.getElementById('modal-gameover');
+
+                document.getElementById('btn-gen-mode').onclick = () => { sfx.click(); mGen.style.display = 'flex'; };
+                document.getElementById('btn-difficulty').onclick = () => { sfx.click(); mDiff.style.display = 'flex'; };
+                document.getElementById('btn-tutorial').onclick = () => { sfx.click(); mTut.style.display = 'flex'; };
+
+                document.querySelectorAll('.modal-close').forEach(b => {
+                    b.onclick = () => { sfx.click(); mGen.style.display = mDiff.style.display = mTut.style.display = 'none'; };
+                });
+
+                document.querySelectorAll('.gen-options .btn').forEach(btn => {
+                    btn.onclick = (e) => {
+                        sfx.click();
+                        this.genAlgorithm = e.currentTarget.dataset.gen;
+                        mGen.style.display = 'none';
+                        this.startNewGame();
+                    };
+                });
+
+                document.querySelectorAll('.diff-grid .btn').forEach(btn => {
+                    btn.onclick = (e) => {
+                        sfx.click();
+                        this.currentDiff = e.currentTarget.dataset.diff;
+                        mDiff.style.display = 'none';
+                        this.startNewGame();
+                    };
+                });
+
+                document.getElementById('btn-inspect').onclick = () => { sfx.click(); mOver.style.display = 'none'; };
+                document.getElementById('btn-play-again').onclick = () => {
+                    sfx.click();
+                    mOver.style.display = 'none';
                     this.startNewGame();
                 };
+            }
 
-                document.getElementById('btn-desktop-reset').onclick = () => this.startNewGame();
-                window.addEventListener('contextmenu', e => e.preventDefault());
+            update2DHUD() {
+                const curMines = this.difficulties[this.currentDiff].mines;
+                let flagged = 0, unrevealed = 0;
+                for (let n of this.nodes) {
+                    if (n.isFlagged) flagged++;
+                    if (!n.isRevealed) unrevealed++;
+                }
+                document.getElementById('hud-mines').textContent = Math.max(0, curMines - flagged);
+                document.getElementById('hud-nodes').textContent = unrevealed;
+                document.getElementById('hud-diff').textContent = this.currentDiff.toUpperCase();
+
+                const genLabels = { 'tree': 'Tree', 'poisson-uniform': 'P-Uniform', 'poisson-seq': 'P-Sequential', 'poisson-biased': 'P-Biased' };
+                document.getElementById('hud-gen').textContent = genLabels[this.genAlgorithm] || 'Tree';
+                document.getElementById('hud-mode').textContent = this.flagMode ? '🚩 Flag' : '⛏️ Reveal';
             }
 
             startNewGame() {
                 this.firstClick = true;
                 this.inGame = true;
-                this.buildNetwork();
-                this.updateHUD();
+                this.buildGraph();
+                this.update2DHUD();
+                this.renderSpatialUI();
             }
 
-            render() {
+            /* -------------------------------------------------------------
+               10. Animation & Render Loop
+            ------------------------------------------------------------- */
+            render(time) {
+                const dt = 0.016; // Stable delta
+
                 if (this.renderer.xr.isPresenting) {
                     this.handleVRInteractions();
                 } else {
                     this.controls.update();
+                    if (!this.inGame) {
+                        this.graphGroup.rotation.y += 0.002;
+                    }
                 }
 
                 this.updateAllSprites();
+                this.updateParticles(dt);
                 this.renderer.render(this.scene, this.camera);
             }
         }
 
         /* -------------------------------------------------------------
-           4. Application Bootstrap
+           Bootstrap Application
         ------------------------------------------------------------- */
         window.addEventListener('DOMContentLoaded', () => {
-            const app = new MinesweeperVR();
-            app.renderer.setAnimationLoop(() => {
-                app.render();
+            const app = new MinesweeperApp();
+            app.renderer.setAnimationLoop((time) => {
+                app.render(time);
             });
         });
     </script>
