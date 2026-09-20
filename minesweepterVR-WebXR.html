@@ -15,9 +15,9 @@
         #webgl-canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; display: block; z-index: 1; }
         .ui-layer { position: absolute; z-index: 10; pointer-events: none; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 16px; }
         .interactive { pointer-events: auto; }
-        header, footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+        header, footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
         .hud-box { background: var(--bg-dark); border: 2px solid var(--neon-green); box-shadow: var(--neon-glow); border-radius: 8px; padding: 10px 16px; font-size: 14px; text-transform: uppercase; }
-        .btn { background: #000; color: var(--neon-green); border: 2px solid var(--neon-green); box-shadow: var(--neon-glow); padding: 8px 14px; font-family: inherit; font-size: 13px; font-weight: bold; border-radius: 6px; cursor: pointer; text-transform: uppercase; }
+        .btn { background: #000; color: var(--neon-green); border: 2px solid var(--neon-green); box-shadow: var(--neon-glow); padding: 8px 14px; font-family: inherit; font-size: 13px; font-weight: bold; border-radius: 6px; cursor: pointer; text-transform: uppercase; transition: all 0.15s ease; }
         .btn:hover { background: var(--neon-green); color: #000; }
         .btn.active { background: var(--neon-green); color: #000; }
     </style>
@@ -38,16 +38,17 @@
     <div class="ui-layer">
         <header>
             <div class="hud-box interactive">
-                Mines: <span id="hud-mines">0</span> | Nodes: <span id="hud-nodes">0</span> | Mode: <span id="hud-mode">Reveal</span>
+                Mines: <span id="hud-mines">0</span> | Nodes: <span id="hud-nodes">0</span> | Gen: <span id="hud-gen">Tree</span> | Mode: <span id="hud-mode">Reveal</span>
             </div>
-            <div class="hud-box interactive">
-                <button class="btn" id="btn-desktop-reset">Reset</button>
+            <div class="hud-box interactive" style="display: flex; gap: 8px;">
+                <button class="btn" id="btn-toggle-gen">Gen: Tree</button>
                 <button class="btn" id="btn-desktop-toggle-flag">🚩 Flag Mode</button>
+                <button class="btn" id="btn-desktop-reset">Reset</button>
             </div>
         </header>
         <footer>
             <div class="hud-box interactive" style="font-size: 12px;">
-                <b>VR Controls:</b> Index Trigger = Reveal | Grip = Move/Rotate World | Hands = Touch Nodes Directly
+                <b>VR Controls:</b> Trigger = Reveal/Flag | Grip Drag = Move/Rotate Field | Hands = Physical Finger Poke
             </div>
         </footer>
     </div>
@@ -89,6 +90,7 @@
             click() { this.playTone(800, 'sine', 0.05, 0.08); }
             reveal() { this.playTone(520, 'triangle', 0.12, 0.12); }
             flag() { this.playTone(320, 'square', 0.08, 0.06); }
+            unflag() { this.playTone(240, 'square', 0.08, 0.06); }
             win() { [440, 554, 659, 880].forEach((f, i) => setTimeout(() => this.playTone(f, 'sine', 0.25, 0.15), i * 110)); }
             explode() {
                 try {
@@ -114,7 +116,7 @@
         const sfx = new SoundFX();
 
         /* -------------------------------------------------------------
-           2. Visual Constants & Cached Texture Generation
+           2. Visual Constants & Cached Material Architecture
         ------------------------------------------------------------- */
         const COLORS = {
             NODE_UNREVEALED: 0x555555,
@@ -127,9 +129,10 @@
             LINK_MINE: 0xff1111
         };
 
-        const NODE_RADIUS = 0.08;
+        // Real-world VR Dimensions (Meters)
+        const NODE_RADIUS = 0.045;
+        const LINK_RADIUS = 0.005;
 
-        // Texture and Material caches to avoid runtime allocations and Quest GPU stalls
         const TEXTURE_CACHE = new Map();
         const MATERIAL_CACHE = new Map();
 
@@ -151,7 +154,7 @@
 
             const tex = new THREE.CanvasTexture(canvas);
             tex.minFilter = THREE.LinearFilter;
-            tex.generateMipmaps = false; // Optimize upload time on mobile VR
+            tex.generateMipmaps = false;
             TEXTURE_CACHE.set(key, tex);
             return tex;
         }
@@ -174,12 +177,12 @@
         function createNumberSprite(number, color = '#ffffff') {
             const mat = getNumberMaterial(number, color);
             const sprite = new THREE.Sprite(mat);
-            sprite.scale.set(NODE_RADIUS * 1.5, NODE_RADIUS * 1.5, 1);
+            sprite.scale.set(NODE_RADIUS * 1.55, NODE_RADIUS * 1.55, 1);
             return sprite;
         }
 
         /* -------------------------------------------------------------
-           3. Game Engine & WebXR System
+           3. WebXR Game Engine & Dual Graph Generators
         ------------------------------------------------------------- */
         class MinesweeperVR {
             constructor() {
@@ -188,18 +191,40 @@
                 this.inGame = true;
                 this.firstClick = true;
                 this.flagMode = false;
-                this.totalMines = 8;
                 this.hoveredNode = null;
+                this.genAlgorithm = 'tree'; // 'tree' or 'poisson'
 
-                // Manipulation tracking
+                // VR Sized Graph Configuration (Dimensions in meters)
+                this.config = {
+                    tree: {
+                        maxNodes: 38,
+                        levels: 3,
+                        branches: 3,
+                        linkLength: 0.16,
+                        minNodeDist: 0.12,
+                        maxSecDist: 0.22,
+                        mines: 7
+                    },
+                    poisson: {
+                        maxNodes: 36,
+                        radius: 0.13,
+                        boxSize: 0.65,
+                        connectionMultiplier: 1.6,
+                        mines: 7
+                    }
+                };
+
+                // World manipulation state
                 this.grabbedBy = [];
                 this.previousControllerMatrix = new THREE.Matrix4();
 
-                // Reusable vectors for zero GC overhead during render loop
+                // Reusable pre-allocated math objects to eliminate runtime GC frame-drops
                 this.camPos = new THREE.Vector3();
                 this.localDir = new THREE.Vector3();
                 this.tempVec = new THREE.Vector3();
                 this.tempNodePos = new THREE.Vector3();
+                this.workingMatrix = new THREE.Matrix4();
+                this.sharedSphereGeo = new THREE.SphereGeometry(NODE_RADIUS, 20, 20);
 
                 this.initGraphics();
                 this.initWebXR();
@@ -211,24 +236,25 @@
             initGraphics() {
                 this.canvas = document.getElementById('webgl-canvas');
                 this.scene = new THREE.Scene();
-                this.scene.background = new THREE.Color(0x050a06);
+                this.scene.background = new THREE.Color(0x040805);
 
                 this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.05, 100);
-                this.camera.position.set(0, 1.4, 0.8);
+                this.camera.position.set(0, 1.4, 0.9);
 
-                this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true });
+                this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
                 this.renderer.setSize(window.innerWidth, window.innerHeight);
                 this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
                 this.renderer.xr.enabled = true;
                 document.body.appendChild(VRButton.createButton(this.renderer));
 
-                this.scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+                this.scene.add(new THREE.AmbientLight(0xffffff, 0.9));
                 const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
                 dirLight.position.set(5, 10, 7);
                 this.scene.add(dirLight);
 
+                // Central interactive space pinned directly in front of the Quest user
                 this.worldAnchor = new THREE.Group();
-                this.worldAnchor.position.set(0, 1.2, -0.6);
+                this.worldAnchor.position.set(0, 1.25, -0.65);
                 this.scene.add(this.worldAnchor);
 
                 window.addEventListener('resize', () => {
@@ -243,17 +269,14 @@
                 this.handModelFactory = new XRHandModelFactory();
                 this.controllers = [];
                 this.hands = [];
-
                 this.raycaster = new THREE.Raycaster();
-                this.workingMatrix = new THREE.Matrix4();
 
                 for (let i = 0; i < 2; i++) {
                     const controller = this.renderer.xr.getController(i);
                     this.scene.add(controller);
 
-                    // Length 1.0 so laser.scale.z matches distance directly
                     const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
-                    const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff66, transparent: true, opacity: 0.5 });
+                    const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff66, transparent: true, opacity: 0.6 });
                     const laser = new THREE.Line(lineGeo, lineMat);
                     laser.name = 'laser';
                     laser.scale.z = 1.5;
@@ -285,134 +308,298 @@
 
             createSpatialHUD() {
                 this.hudCanvas = document.createElement('canvas');
-                this.hudCanvas.width = 512; this.hudCanvas.height = 128;
+                this.hudCanvas.width = 512; 
+                this.hudCanvas.height = 160;
                 this.hudCtx = this.hudCanvas.getContext('2d');
 
                 this.hudTexture = new THREE.CanvasTexture(this.hudCanvas);
-                const hudGeo = new THREE.PlaneGeometry(0.6, 0.15);
+                this.hudTexture.generateMipmaps = false;
+                this.hudTexture.minFilter = THREE.LinearFilter;
+
+                const hudGeo = new THREE.PlaneGeometry(0.55, 0.17);
                 const hudMat = new THREE.MeshBasicMaterial({ map: this.hudTexture, transparent: true });
 
                 this.hudMesh = new THREE.Mesh(hudGeo, hudMat);
-                this.hudMesh.position.set(0, 0.45, 0);
+                this.hudMesh.position.set(0, 0.42, 0);
                 this.worldAnchor.add(this.hudMesh);
-                this.updateHUD();
             }
 
             updateHUD() {
-                let remaining = this.totalMines;
+                const curMines = this.getCurrentMineCount();
+                let remaining = curMines;
                 let unrevealed = 0;
                 for (let n of this.nodes) {
                     if (n.isFlagged) remaining--;
                     if (!n.isRevealed) unrevealed++;
                 }
 
+                // 2D Web HUD
                 document.getElementById('hud-mines').textContent = Math.max(0, remaining);
                 document.getElementById('hud-nodes').textContent = unrevealed;
-                document.getElementById('hud-mode').textContent = this.flagMode ? '🚩 Flagging' : '⛏️ Revealing';
+                document.getElementById('hud-gen').textContent = this.genAlgorithm === 'poisson' ? 'Poisson' : 'Tree';
+                document.getElementById('hud-mode').textContent = this.flagMode ? '🚩 Flag' : '⛏️ Reveal';
+                document.getElementById('btn-toggle-gen').textContent = `Gen: ${this.genAlgorithm === 'poisson' ? 'Poisson' : 'Tree'}`;
 
-                this.hudCtx.fillStyle = 'rgba(5, 20, 10, 0.85)';
-                this.hudCtx.fillRect(0, 0, 512, 128);
+                // In-World 3D Spatial Canvas
+                this.hudCtx.fillStyle = 'rgba(5, 20, 10, 0.88)';
+                this.hudCtx.fillRect(0, 0, 512, 160);
                 this.hudCtx.strokeStyle = '#00ff66';
                 this.hudCtx.lineWidth = 6;
-                this.hudCtx.strokeRect(4, 4, 504, 120);
+                this.hudCtx.strokeRect(4, 4, 504, 152);
 
                 this.hudCtx.fillStyle = '#00ff66';
-                this.hudCtx.font = 'bold 36px monospace';
+                this.hudCtx.font = 'bold 32px monospace';
                 this.hudCtx.textAlign = 'center';
-                this.hudCtx.fillText(`MINES: ${Math.max(0, remaining)}  |  LEFT: ${unrevealed}`, 256, 50);
+                this.hudCtx.fillText(`MINES: ${Math.max(0, remaining)} | LEFT: ${unrevealed}`, 256, 45);
 
-                this.hudCtx.font = '26px monospace';
-                this.hudCtx.fillStyle = this.flagMode ? '#ff3333' : '#88ffaa';
-                this.hudCtx.fillText(`MODE: ${this.flagMode ? 'FLAGGING [🚩]' : 'REVEAL [⛏️]'}`, 256, 95);
+                this.hudCtx.font = '24px monospace';
+                this.hudCtx.fillStyle = '#88ffaa';
+                this.hudCtx.fillText(`ALGO: ${this.genAlgorithm.toUpperCase()} GRAPH`, 256, 88);
+
+                this.hudCtx.fillStyle = this.flagMode ? '#ff3333' : '#00ff66';
+                this.hudCtx.fillText(`TOOL: ${this.flagMode ? 'FLAGGING [🚩]' : 'REVEALING [⛏️]'}`, 256, 130);
 
                 this.hudTexture.needsUpdate = true;
             }
 
-            buildNetwork(count = 32) {
+            getCurrentMineCount() {
+                return this.genAlgorithm === 'poisson' ? this.config.poisson.mines : this.config.tree.mines;
+            }
+
+            clearGraph() {
                 while (this.worldAnchor.children.length > 0) {
                     const obj = this.worldAnchor.children[0];
                     if (obj === this.hudMesh) {
                         this.worldAnchor.remove(obj);
                     } else {
                         this.worldAnchor.remove(obj);
-                        if (obj.geometry) obj.geometry.dispose();
+                        if (obj.geometry && obj.geometry !== this.sharedSphereGeo) obj.geometry.dispose();
                     }
                 }
                 this.worldAnchor.add(this.hudMesh);
                 this.nodes = [];
                 this.links = [];
+            }
 
-                const sphereGeo = new THREE.SphereGeometry(NODE_RADIUS, 24, 24);
-                
-                const baseNodeMat = new THREE.MeshStandardMaterial({
-                    color: COLORS.NODE_UNREVEALED,
-                    roughness: 0.3,
-                    metalness: 0.1,
-                    polygonOffset: true,
-                    polygonOffsetFactor: 1,
-                    polygonOffsetUnits: 1
-                });
+            /* -------------------------------------------------------------
+               Algorithm A: Recursive Tree Branching (Scaled for VR)
+            ------------------------------------------------------------- */
+            generateTreeGraph() {
+                this.clearGraph();
+                const cfg = this.config.tree;
 
-                const spread = 0.45;
-                for (let i = 0; i < count; i++) {
-                    let pos, valid;
-                    let tries = 0;
-                    do {
-                        valid = true;
-                        pos = new THREE.Vector3(
-                            (Math.random() - 0.5) * 2 * spread,
-                            (Math.random() - 0.5) * 2 * spread,
-                            (Math.random() - 0.5) * 2 * spread
-                        );
-                        for (let n of this.nodes) {
-                            if (pos.distanceTo(n.pos) < NODE_RADIUS * 3.5) { valid = false; break; }
+                this.addNode(new THREE.Vector3(0, 0, 0));
+                const queue = [{ id: 0, level: 0 }];
+
+                while (queue.length > 0 && this.nodes.length < cfg.maxNodes) {
+                    const curr = queue.shift();
+                    if (curr.level >= cfg.levels) continue;
+
+                    for (let b = 0; b < cfg.branches; b++) {
+                        if (this.nodes.length >= cfg.maxNodes) break;
+
+                        let found = false;
+                        const candPos = new THREE.Vector3();
+
+                        for (let attempts = 0; attempts < 35; attempts++) {
+                            const randDir = new THREE.Vector3(
+                                (Math.random() - 0.5) * 2,
+                                (Math.random() - 0.5) * 2,
+                                (Math.random() - 0.5) * 2
+                            ).normalize();
+
+                            candPos.copy(this.nodes[curr.id].pos).addScaledVector(randDir, cfg.linkLength);
+
+                            let tooClose = false;
+                            for (let n of this.nodes) {
+                                if (candPos.distanceTo(n.pos) < cfg.minNodeDist) {
+                                    tooClose = true;
+                                    break;
+                                }
+                            }
+                            if (!tooClose) {
+                                found = true;
+                                break;
+                            }
                         }
-                        tries++;
-                    } while (!valid && tries < 100);
 
-                    const mesh = new THREE.Mesh(sphereGeo, baseNodeMat.clone());
-                    mesh.position.copy(pos);
-                    mesh.userData = { nodeId: i };
-                    this.worldAnchor.add(mesh);
-
-                    this.nodes.push({
-                        id: i, pos, mesh, sprite: null, neighbors: [], links: [],
-                        isMine: false, isRevealed: false, isFlagged: false, isHinted: false, adjMines: 0
-                    });
+                        if (found) {
+                            const newId = this.addNode(candPos);
+                            this.addConnection(curr.id, newId);
+                            queue.push({ id: newId, level: curr.level + 1 });
+                        }
+                    }
                 }
 
-                const linkMat = new THREE.MeshStandardMaterial({ color: COLORS.LINK_DEFAULT, roughness: 0.5 });
-                const maxConnectDist = spread * 0.75;
+                // Add secondary cyclic connections for web topology
                 for (let i = 0; i < this.nodes.length; i++) {
                     for (let j = i + 1; j < this.nodes.length; j++) {
                         const dist = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
-                        if (dist < maxConnectDist && this.nodes[i].neighbors.length < 4 && this.nodes[j].neighbors.length < 4) {
-                            this.addConnection(i, j, linkMat);
+                        if (dist <= cfg.maxSecDist && dist >= cfg.minNodeDist * 0.8) {
+                            if (this.nodes[i].neighbors.length < 5 && this.nodes[j].neighbors.length < 5) {
+                                if (!this.nodes[i].neighbors.includes(j)) {
+                                    this.addConnection(i, j);
+                                }
+                            }
                         }
-                    }
-                    if (this.nodes[i].neighbors.length === 0) {
-                        let nearest = -1, minD = Infinity;
-                        for (let j = 0; j < this.nodes.length; j++) {
-                            if (i === j) continue;
-                            const d = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
-                            if (d < minD) { minD = d; nearest = j; }
-                        }
-                        if (nearest !== -1) this.addConnection(i, nearest, linkMat);
                     }
                 }
             }
 
-            addConnection(a, b, mat) {
+            /* -------------------------------------------------------------
+               Algorithm B: 3D Poisson Disk Sampling (Scaled for VR)
+            ------------------------------------------------------------- */
+            generatePoissonGraph() {
+                this.clearGraph();
+                const cfg = this.config.poisson;
+                const r = cfg.radius;
+                const sqRadius = r * r;
+                const maxPoints = cfg.maxNodes;
+                const k = 30;
+                const boxSize = cfg.boxSize;
+                const halfBox = boxSize / 2;
+
+                const cellSize = r / Math.sqrt(3);
+                const gridDim = Math.ceil(boxSize / cellSize);
+                const grid = new Int32Array(gridDim * gridDim * gridDim).fill(-1);
+                const getGridIdx = (gx, gy, gz) => (gx * gridDim + gy) * gridDim + gz;
+
+                const points = [];
+                const spawnPoints = [];
+
+                const firstPt = new THREE.Vector3(0, 0, 0);
+                points.push(firstPt);
+                spawnPoints.push(firstPt);
+
+                const gX = Math.floor((firstPt.x + halfBox) / cellSize);
+                const gY = Math.floor((firstPt.y + halfBox) / cellSize);
+                const gZ = Math.floor((firstPt.z + halfBox) / cellSize);
+                grid[getGridIdx(gX, gY, gZ)] = 0;
+
+                const isValid = (candidate) => {
+                    if (candidate.x < -halfBox || candidate.x >= halfBox ||
+                        candidate.y < -halfBox || candidate.y >= halfBox ||
+                        candidate.z < -halfBox || candidate.z >= halfBox) {
+                        return false;
+                    }
+
+                    const cx = Math.floor((candidate.x + halfBox) / cellSize);
+                    const cy = Math.floor((candidate.y + halfBox) / cellSize);
+                    const cz = Math.floor((candidate.z + halfBox) / cellSize);
+
+                    const startX = Math.max(0, cx - 2);
+                    const endX = Math.min(gridDim - 1, cx + 2);
+                    const startY = Math.max(0, cy - 2);
+                    const endY = Math.min(gridDim - 1, cy + 2);
+                    const startZ = Math.max(0, cz - 2);
+                    const endZ = Math.min(gridDim - 1, cz + 2);
+
+                    for (let x = startX; x <= endX; x++) {
+                        for (let y = startY; y <= endY; y++) {
+                            for (let z = startZ; z <= endZ; z++) {
+                                const ptIdx = grid[getGridIdx(x, y, z)];
+                                if (ptIdx !== -1) {
+                                    if (candidate.distanceToSquared(points[ptIdx]) < sqRadius) return false;
+                                }
+                            }
+                        }
+                    }
+                    return true;
+                };
+
+                while (spawnPoints.length > 0 && points.length < maxPoints) {
+                    const spawnIndex = Math.floor(Math.random() * spawnPoints.length);
+                    const spawnCentre = spawnPoints[spawnIndex];
+                    let accepted = false;
+
+                    for (let i = 0; i < k; i++) {
+                        const theta = Math.random() * Math.PI * 2;
+                        const phi = Math.acos(2 * Math.random() - 1);
+                        const radiusOffset = r + Math.random() * r;
+
+                        const candidate = new THREE.Vector3(
+                            spawnCentre.x + radiusOffset * Math.sin(phi) * Math.cos(theta),
+                            spawnCentre.y + radiusOffset * Math.sin(phi) * Math.sin(theta),
+                            spawnCentre.z + radiusOffset * Math.cos(phi)
+                        );
+
+                        if (isValid(candidate)) {
+                            const newIdx = points.length;
+                            points.push(candidate);
+                            spawnPoints.push(candidate);
+
+                            const cx = Math.floor((candidate.x + halfBox) / cellSize);
+                            const cy = Math.floor((candidate.y + halfBox) / cellSize);
+                            const cz = Math.floor((candidate.z + halfBox) / cellSize);
+                            grid[getGridIdx(cx, cy, cz)] = newIdx;
+
+                            accepted = true;
+                            if (points.length >= maxPoints) break;
+                        }
+                    }
+
+                    if (!accepted) spawnPoints.splice(spawnIndex, 1);
+                }
+
+                points.forEach(pt => this.addNode(pt));
+
+                const connectionRadius = r * cfg.connectionMultiplier;
+                for (let i = 0; i < this.nodes.length; i++) {
+                    for (let j = i + 1; j < this.nodes.length; j++) {
+                        const dist = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
+                        if (dist <= connectionRadius) {
+                            if (this.nodes[i].neighbors.length < 5 && this.nodes[j].neighbors.length < 5) {
+                                this.addConnection(i, j);
+                            }
+                        }
+                    }
+                }
+
+                // Prevent isolated island nodes
+                for (let i = 0; i < this.nodes.length; i++) {
+                    if (this.nodes[i].neighbors.length === 0) {
+                        let closest = -1, minD = Infinity;
+                        for (let j = 0; j < this.nodes.length; j++) {
+                            if (i === j) continue;
+                            const d = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
+                            if (d < minD) { minD = d; closest = j; }
+                        }
+                        if (closest !== -1) this.addConnection(i, closest);
+                    }
+                }
+            }
+
+            addNode(pos) {
+                const id = this.nodes.length;
+                const mat = new THREE.MeshStandardMaterial({
+                    color: COLORS.NODE_UNREVEALED,
+                    roughness: 0.35,
+                    metalness: 0.15
+                });
+                const mesh = new THREE.Mesh(this.sharedSphereGeo, mat);
+                mesh.position.copy(pos);
+                mesh.userData = { nodeId: id };
+                this.worldAnchor.add(mesh);
+
+                this.nodes.push({
+                    id, pos: pos.clone(), mesh, sprite: null, neighbors: [], links: [],
+                    isMine: false, isRevealed: false, isFlagged: false, isHinted: false, adjMines: 0
+                });
+                return id;
+            }
+
+            addConnection(a, b) {
                 const p1 = this.nodes[a].pos;
                 const p2 = this.nodes[b].pos;
                 const dir = new THREE.Vector3().subVectors(p2, p1);
                 const len = dir.length();
 
-                const geom = new THREE.CylinderGeometry(0.008, 0.008, len, 6);
+                const geom = new THREE.CylinderGeometry(LINK_RADIUS, LINK_RADIUS, len, 6);
                 geom.translate(0, len / 2, 0);
                 geom.rotateX(Math.PI / 2);
 
-                const mesh = new THREE.Mesh(geom, mat.clone());
+                const mat = new THREE.MeshStandardMaterial({ color: COLORS.LINK_DEFAULT, roughness: 0.5 });
+                const mesh = new THREE.Mesh(geom, mat);
                 mesh.position.copy(p1);
                 mesh.lookAt(p2);
                 this.worldAnchor.add(mesh);
@@ -425,7 +612,14 @@
                 this.nodes[b].links.push(linkId);
             }
 
-            /* Dynamically colors the connections between nodes */
+            buildNetwork() {
+                if (this.genAlgorithm === 'poisson') {
+                    this.generatePoissonGraph();
+                } else {
+                    this.generateTreeGraph();
+                }
+            }
+
             updateLinksColor() {
                 for (let link of this.links) {
                     const na = this.nodes[link.a];
@@ -442,8 +636,9 @@
             }
 
             plantMines(startNodeId) {
+                const totalMines = this.getCurrentMineCount();
                 let planted = 0;
-                while (planted < this.totalMines) {
+                while (planted < totalMines) {
                     const idx = Math.floor(Math.random() * this.nodes.length);
                     if (idx === startNodeId || this.nodes[startNodeId].neighbors.includes(idx)) continue;
                     if (!this.nodes[idx].isMine) {
@@ -509,7 +704,7 @@
                     node.mesh.material.color.setHex(COLORS.NODE_FLAG);
                     if (node.sprite) node.sprite.visible = false;
                 } else {
-                    sfx.reveal();
+                    sfx.unflag();
                     node.mesh.material.color.setHex(node.isHinted ? COLORS.NODE_HINT : COLORS.NODE_UNREVEALED);
                     if (node.sprite) node.sprite.visible = true;
                 }
@@ -527,7 +722,6 @@
                 const sprite = createNumberSprite(node.adjMines, color);
                 node.mesh.add(sprite);
                 node.sprite = sprite;
-                
                 this.orientSprite(node);
             }
 
@@ -578,13 +772,14 @@
             }
 
             checkWin() {
+                const totalMines = this.getCurrentMineCount();
                 let correctFlags = 0;
                 let safeRevealed = 0;
                 for (let n of this.nodes) {
                     if (n.isFlagged && n.isMine) correctFlags++;
                     if (n.isRevealed && !n.isMine) safeRevealed++;
                 }
-                if (safeRevealed === this.nodes.length - this.totalMines || correctFlags === this.totalMines) {
+                if (safeRevealed === this.nodes.length - totalMines || correctFlags === totalMines) {
                     this.inGame = false;
                     sfx.win();
                 }
@@ -628,18 +823,17 @@
                     this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.workingMatrix);
 
                     const hits = this.raycaster.intersectObjects(nodeMeshes, false);
+                    const laser = controller.getObjectByName('laser');
                     if (hits.length > 0) {
                         foundHover = this.nodes[hits[0].object.userData.nodeId];
-                        const laser = controller.getObjectByName('laser');
                         if (laser) laser.scale.z = hits[0].distance;
                         break;
                     } else {
-                        const laser = controller.getObjectByName('laser');
                         if (laser) laser.scale.z = 1.5;
                     }
                 }
 
-                // Direct Hand-Tracking Poke Detection
+                // Direct Physical Hand Finger Poke
                 for (let hand of this.hands) {
                     if (hand.joints) {
                         const indexTip = hand.joints['index-finger-tip'];
@@ -667,7 +861,7 @@
                     }
                 }
 
-                // 6DoF World Manipulation via Grip Drag
+                // 6DoF Field Manipulation via Grip Drag
                 if (this.grabbedBy.length === 1) {
                     const c = this.grabbedBy[0];
                     const delta = new THREE.Matrix4().copy(c.matrixWorld).multiply(this.previousControllerMatrix.invert());
@@ -703,6 +897,12 @@
                     document.getElementById('btn-desktop-toggle-flag').classList.toggle('active', this.flagMode);
                     this.updateHUD();
                 };
+
+                document.getElementById('btn-toggle-gen').onclick = () => {
+                    this.genAlgorithm = this.genAlgorithm === 'tree' ? 'poisson' : 'tree';
+                    this.startNewGame();
+                };
+
                 document.getElementById('btn-desktop-reset').onclick = () => this.startNewGame();
                 window.addEventListener('contextmenu', e => e.preventDefault());
             }
@@ -710,7 +910,7 @@
             startNewGame() {
                 this.firstClick = true;
                 this.inGame = true;
-                this.buildNetwork(32);
+                this.buildNetwork();
                 this.updateHUD();
             }
 
@@ -721,9 +921,7 @@
                     this.controls.update();
                 }
 
-                // Keep numbers pinned on the outer hull facing the active camera
                 this.updateAllSprites();
-
                 this.renderer.render(this.scene, this.camera);
             }
         }
