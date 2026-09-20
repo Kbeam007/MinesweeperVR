@@ -396,8 +396,8 @@
             LINK_MINE: 0xff1111
         };
 
-        const NODE_RADIUS = 0.045; // 4.5 cm
-        const LINK_RADIUS = 0.005; // 5 mm
+        const NODE_RADIUS = 0.05;  // 5 cm radius
+        const LINK_RADIUS = 0.007; // 7 mm link radius
 
         const TEXTURE_CACHE = new Map();
         const MATERIAL_CACHE = new Map();
@@ -466,27 +466,27 @@
                 this.genAlgorithm = 'tree'; // 'tree', 'poisson-uniform', 'poisson-seq', 'poisson-biased'
                 this.currentDiff = 'easy';   // 'easy', 'medium', 'hard', 'insane'
 
-                // Real-world meter coordinates tuned for Quest field-of-reach
+                // Real-world distances scaled 3x for clear separation and visibility
                 this.difficulties = {
                     easy: {
                         mines: 4,
-                        tree: { maxNodes: 24, levels: 2, branches: 3, linkLength: 0.16, minNodeDist: 0.12, maxSecDist: 0.23 },
-                        poisson: { maxNodes: 24, radius: 0.14, boxSize: 0.55, connMult: 1.6 }
+                        tree: { maxNodes: 24, levels: 2, branches: 3, linkLength: 0.48, minNodeDist: 0.36, maxSecDist: 0.69 },
+                        poisson: { maxNodes: 24, radius: 0.42, boxSize: 1.65, connMult: 1.6 }
                     },
                     medium: {
                         mines: 12,
-                        tree: { maxNodes: 48, levels: 3, branches: 3, linkLength: 0.15, minNodeDist: 0.11, maxSecDist: 0.22 },
-                        poisson: { maxNodes: 48, radius: 0.13, boxSize: 0.68, connMult: 1.6 }
+                        tree: { maxNodes: 48, levels: 3, branches: 3, linkLength: 0.45, minNodeDist: 0.33, maxSecDist: 0.66 },
+                        poisson: { maxNodes: 48, radius: 0.39, boxSize: 2.04, connMult: 1.6 }
                     },
                     hard: {
                         mines: 28,
-                        tree: { maxNodes: 95, levels: 4, branches: 3, linkLength: 0.14, minNodeDist: 0.10, maxSecDist: 0.21 },
-                        poisson: { maxNodes: 95, radius: 0.12, boxSize: 0.82, connMult: 1.55 }
+                        tree: { maxNodes: 95, levels: 4, branches: 3, linkLength: 0.42, minNodeDist: 0.30, maxSecDist: 0.63 },
+                        poisson: { maxNodes: 95, radius: 0.36, boxSize: 2.46, connMult: 1.55 }
                     },
                     insane: {
                         mines: 55,
-                        tree: { maxNodes: 160, levels: 5, branches: 3, linkLength: 0.13, minNodeDist: 0.09, maxSecDist: 0.20 },
-                        poisson: { maxNodes: 160, radius: 0.11, boxSize: 0.98, connMult: 1.55 }
+                        tree: { maxNodes: 160, levels: 5, branches: 3, linkLength: 0.39, minNodeDist: 0.27, maxSecDist: 0.60 },
+                        poisson: { maxNodes: 160, radius: 0.33, boxSize: 2.94, connMult: 1.55 }
                     }
                 };
 
@@ -517,8 +517,9 @@
                 this.scene = new THREE.Scene();
                 this.scene.background = new THREE.Color(0x020603);
 
+                // Extended camera distance to frame the 3x larger matrix
                 this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 120);
-                this.camera.position.set(0, 1.35, 0.95);
+                this.camera.position.set(0, 1.45, 2.2);
 
                 this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
                 this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -528,12 +529,12 @@
 
                 this.scene.add(new THREE.AmbientLight(0xffffff, 0.85));
                 const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
-                dirLight.position.set(5, 10, 7);
+                dirLight.position.set(6, 12, 8);
                 this.scene.add(dirLight);
 
-                // Central matrix anchor positioned directly at comfortable chest height
+                // Central matrix anchor placed comfortably forward to accommodate 3x graph radius
                 this.worldAnchor = new THREE.Group();
-                this.worldAnchor.position.set(0, 1.22, -0.65);
+                this.worldAnchor.position.set(0, 1.25, -0.9);
                 this.scene.add(this.worldAnchor);
 
                 this.graphGroup = new THREE.Group();
@@ -561,7 +562,7 @@
                     const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff66, transparent: true, opacity: 0.6 });
                     const laser = new THREE.Line(lineGeo, lineMat);
                     laser.name = 'laser';
-                    laser.scale.z = 1.5;
+                    laser.scale.z = 4.5; // Extended default reach for 3x larger matrix
                     controller.add(laser);
 
                     const grip = this.renderer.xr.getControllerGrip(i);
@@ -597,11 +598,12 @@
                 this.hudTexture.minFilter = THREE.LinearFilter;
                 this.hudTexture.generateMipmaps = false;
 
-                const hudGeo = new THREE.PlaneGeometry(0.72, 0.30);
+                const hudGeo = new THREE.PlaneGeometry(0.85, 0.35);
                 const hudMat = new THREE.MeshBasicMaterial({ map: this.hudTexture, transparent: true, side: THREE.DoubleSide });
 
                 this.hudMesh = new THREE.Mesh(hudGeo, hudMat);
-                this.hudMesh.position.set(0, 0.48, 0);
+                // Placed above the expanded 3x matrix to prevent intersection
+                this.hudMesh.position.set(0, 1.15, 0);
                 this.worldAnchor.add(this.hudMesh);
 
                 this.virtualButtons = [];
@@ -866,7 +868,7 @@
                     }
                 }
 
-                // Cross connections
+                // Cross connections adapted to 3x spacing bounds
                 for (let i = 0; i < this.nodes.length; i++) {
                     for (let j = i + 1; j < this.nodes.length; j++) {
                         const d = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
@@ -1268,7 +1270,7 @@
                7. Particle Systems (Explosions)
             ------------------------------------------------------------- */
             createExplosionParticles(worldPos, hex) {
-                const count = 35;
+                const count = 40;
                 const pGeo = new THREE.BufferGeometry();
                 const pos = new Float32Array(count * 3);
                 const vels = [];
@@ -1278,14 +1280,14 @@
                     pos[i * 3 + 1] = worldPos.y;
                     pos[i * 3 + 2] = worldPos.z;
                     vels.push(new THREE.Vector3(
-                        (Math.random() - 0.5) * 1.5,
-                        (Math.random() - 0.5) * 1.5,
-                        (Math.random() - 0.5) * 1.5
+                        (Math.random() - 0.5) * 2.6,
+                        (Math.random() - 0.5) * 2.6,
+                        (Math.random() - 0.5) * 2.6
                     ));
                 }
 
                 pGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-                const pMat = new THREE.PointsMaterial({ color: hex, size: 0.02, transparent: true, opacity: 1 });
+                const pMat = new THREE.PointsMaterial({ color: hex, size: 0.035, transparent: true, opacity: 1 });
                 const pSys = new THREE.Points(pGeo, pMat);
                 this.scene.add(pSys);
                 this.particles.push({ mesh: pSys, vels, life: 1.0 });
@@ -1353,7 +1355,7 @@
                 const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
                 this.raycaster.camera = cam;
 
-                // Controller Raycasting
+                // Controller Raycasting with expanded reach
                 for (let controller of this.controllers) {
                     this.workingMatrix.identity().extractRotation(controller.matrixWorld);
                     this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
@@ -1385,7 +1387,7 @@
                         if (laser) laser.scale.z = hits[0].distance;
                         break;
                     } else {
-                        if (laser) laser.scale.z = 1.5;
+                        if (laser) laser.scale.z = 4.5;
                     }
                 }
 
@@ -1431,7 +1433,7 @@
 
             initDesktopInteraction() {
                 this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-                this.controls.target.set(0, 1.25, -0.65);
+                this.controls.target.set(0, 1.25, -0.9);
                 this.controls.enableDamping = true;
 
                 const mouse = new THREE.Vector2();
@@ -1557,7 +1559,7 @@
                10. Animation & Render Loop
             ------------------------------------------------------------- */
             render(time) {
-                const dt = 0.016; // Stable delta
+                const dt = 0.016;
 
                 if (this.renderer.xr.isPresenting) {
                     this.handleVRInteractions();
