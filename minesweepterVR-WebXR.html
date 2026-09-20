@@ -470,35 +470,45 @@
                 // Menu visibility & state
                 this.isSpatialMenuOpen = true;
 
-                // 4 Generation algorithms & 5 Difficulty Presets (Aligned with C# Unity parameters)
+                // Throttled & Reactive Sprite Billboarding
+                this.spriteUpdateTimer = 0;
+                this.needsSpriteUpdate = false;
+
+                // 4 Generation algorithms & 5 Difficulty Presets
                 this.genAlgorithm = 'tree';
                 this.currentDiff = 'easy';
+
+                // Uniform base metrics locked to Easy to preserve open spacing across all difficulties
+                const BASE_TREE_LINK    = 0.48;
+                const BASE_TREE_MIN_D   = 0.36;
+                const BASE_TREE_MAX_SEC = 0.69;
+                const BASE_POISSON_R    = 0.42;
 
                 this.difficulties = {
                     easy: {
                         mines: 5,
-                        tree: { maxNodes: 21, levels: 2, branches: 4, linkLength: 0.48, minNodeDist: 0.36, maxSecDist: 0.69 },
-                        poisson: { maxNodes: 21, radius: 0.42, boxSize: 1.65, connMult: 1.6 }
+                        tree: { maxNodes: 21, levels: 2, branches: 4, linkLength: BASE_TREE_LINK, minNodeDist: BASE_TREE_MIN_D, maxSecDist: BASE_TREE_MAX_SEC },
+                        poisson: { maxNodes: 21, radius: BASE_POISSON_R, boxSize: 1.65, connMult: 1.6 }
                     },
                     medium: {
                         mines: 30,
-                        tree: { maxNodes: 85, levels: 3, branches: 4, linkLength: 0.44, minNodeDist: 0.30, maxSecDist: 0.62 },
-                        poisson: { maxNodes: 85, radius: 0.30, boxSize: 2.30, connMult: 1.55 }
+                        tree: { maxNodes: 85, levels: 4, branches: 3, linkLength: BASE_TREE_LINK, minNodeDist: BASE_TREE_MIN_D, maxSecDist: BASE_TREE_MAX_SEC },
+                        poisson: { maxNodes: 85, radius: BASE_POISSON_R, boxSize: 2.65, connMult: 1.6 }
                     },
                     hard: {
                         mines: 45,
-                        tree: { maxNodes: 121, levels: 4, branches: 3, linkLength: 0.40, minNodeDist: 0.26, maxSecDist: 0.58 },
-                        poisson: { maxNodes: 121, radius: 0.27, boxSize: 2.65, connMult: 1.55 }
+                        tree: { maxNodes: 121, levels: 5, branches: 3, linkLength: BASE_TREE_LINK, minNodeDist: BASE_TREE_MIN_D, maxSecDist: BASE_TREE_MAX_SEC },
+                        poisson: { maxNodes: 121, radius: BASE_POISSON_R, boxSize: 3.00, connMult: 1.6 }
                     },
                     vhard: {
                         mines: 130,
-                        tree: { maxNodes: 364, levels: 5, branches: 3, linkLength: 0.36, minNodeDist: 0.22, maxSecDist: 0.52 },
-                        poisson: { maxNodes: 364, radius: 0.21, boxSize: 3.45, connMult: 1.5 }
+                        tree: { maxNodes: 364, levels: 7, branches: 3, linkLength: BASE_TREE_LINK, minNodeDist: BASE_TREE_MIN_D, maxSecDist: BASE_TREE_MAX_SEC },
+                        poisson: { maxNodes: 364, radius: BASE_POISSON_R, boxSize: 4.25, connMult: 1.6 }
                     },
                     insane: {
                         mines: 500,
-                        tree: { maxNodes: 1093, levels: 6, branches: 3, linkLength: 0.30, minNodeDist: 0.16, maxSecDist: 0.44 },
-                        poisson: { maxNodes: 1093, radius: 0.15, boxSize: 4.60, connMult: 1.45 }
+                        tree: { maxNodes: 1093, levels: 10, branches: 3, linkLength: BASE_TREE_LINK, minNodeDist: BASE_TREE_MIN_D, maxSecDist: BASE_TREE_MAX_SEC },
+                        poisson: { maxNodes: 1093, radius: BASE_POISSON_R, boxSize: 6.20, connMult: 1.6 }
                     }
                 };
 
@@ -563,6 +573,7 @@
                     this.camera.aspect = window.innerWidth / window.innerHeight;
                     this.camera.updateProjectionMatrix();
                     this.renderer.setSize(window.innerWidth, window.innerHeight);
+                    this.needsSpriteUpdate = true;
                 });
             }
 
@@ -742,7 +753,7 @@
 
                 this.virtualButtons = [];
 
-                // Close [X] Button in the top right corner
+                // Close [X] Button in top right corner
                 this.registerVJButton('close-hud-window', 958, 14, 52, 44, '✕');
 
                 const curMines = this.difficulties[this.currentDiff].mines;
@@ -784,16 +795,13 @@
                     ctx.textAlign = 'center';
                     ctx.fillText('SELECT DIFFICULTY PRESET', 480, 38);
 
-                    // Row 1: Easy, Medium, Hard
                     this.registerVJButton('set-diff-easy', 40, 60, 296, 80, 'EASY', this.currentDiff === 'easy', '5 Mines (21 Nodes)');
                     this.registerVJButton('set-diff-medium', 364, 60, 296, 80, 'MEDIUM', this.currentDiff === 'medium', '30 Mines (85 Nodes)');
                     this.registerVJButton('set-diff-hard', 688, 60, 296, 80, 'HARD', this.currentDiff === 'hard', '45 Mines (121 Nodes)');
 
-                    // Row 2: Very Hard, Insane
                     this.registerVJButton('set-diff-vhard', 40, 160, 450, 85, 'VERY HARD', this.currentDiff === 'vhard', '130 Mines (364 Nodes)');
                     this.registerVJButton('set-diff-insane', 534, 160, 450, 85, 'INSANE', this.currentDiff === 'insane', '500 Mines (1,093 Nodes)');
 
-                    // Row 3: Back Button
                     this.registerVJButton('close-page', 40, 275, 944, 75, 'BACK TO DASHBOARD', false);
                 } else if (this.vrUIPage === 'tut') {
                     ctx.fillStyle = '#00ff66';
@@ -1263,7 +1271,10 @@
                 } else {
                     sfx.unflag();
                     node.mesh.material.color.setHex(node.isHinted ? COLORS.NODE_HINT : COLORS.NODE_UNREVEALED);
-                    if (node.sprite) node.sprite.visible = true;
+                    if (node.sprite) {
+                        node.sprite.visible = true;
+                        this.orientSprite(node);
+                    }
                 }
 
                 this.updateLinksColor();
@@ -1394,6 +1405,7 @@
                         l.mesh.material.color.setHex(COLORS.LINK_SAFE);
                     }
                 }
+                this.needsSpriteUpdate = true;
             }
 
             createExplosionParticles(worldPos, hex) {
@@ -1655,12 +1667,13 @@
 
                 this.hoveredVRButton = foundHoverBtn;
 
-                // 6DoF Field Manipulation
+                // 6DoF Field Manipulation: update sprites continuously during movement/rotation
                 if (this.grabbedBy.length === 1) {
                     const c = this.grabbedBy[0];
                     const delta = new THREE.Matrix4().copy(c.matrixWorld).multiply(this.previousControllerMatrix.invert());
                     this.worldAnchor.applyMatrix4(delta);
                     this.previousControllerMatrix.copy(c.matrixWorld);
+                    this.needsSpriteUpdate = true;
                 }
             }
 
@@ -1668,6 +1681,11 @@
                 this.controls = new OrbitControls(this.camera, this.renderer.domElement);
                 this.controls.target.set(0, 1.25, -0.9);
                 this.controls.enableDamping = true;
+
+                // Trigger sprite updates whenever OrbitControls camera transforms change
+                this.controls.addEventListener('change', () => {
+                    this.needsSpriteUpdate = true;
+                });
 
                 const mouse = new THREE.Vector2();
                 const dRay = new THREE.Raycaster();
@@ -1804,6 +1822,8 @@
                 this.buildGraph();
                 this.update2DHUD();
                 this.renderSpatialUI();
+                this.needsSpriteUpdate = true;
+                this.spriteUpdateTimer = 0;
             }
 
             /* -------------------------------------------------------------
@@ -1818,10 +1838,18 @@
                     this.controls.update();
                     if (!this.inGame) {
                         this.graphGroup.rotation.y += 0.002;
+                        this.needsSpriteUpdate = true;
                     }
                 }
 
-                this.updateAllSprites();
+                // Throttled and Reactive Billboarding
+                this.spriteUpdateTimer += dt;
+                if (this.needsSpriteUpdate || this.spriteUpdateTimer >= 1.0) {
+                    this.updateAllSprites();
+                    this.spriteUpdateTimer = 0;
+                    this.needsSpriteUpdate = false;
+                }
+
                 this.updateParticles(dt);
                 this.renderer.render(this.scene, this.camera);
             }
