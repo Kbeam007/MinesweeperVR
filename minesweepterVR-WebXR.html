@@ -392,7 +392,6 @@
             NODE_HINT: 0xe5dc1a,
             NODE_FLAG: 0xff1111,
             NODE_MINE: 0xff0022,
-            // Links now initially match the unrevealed gray nodes
             LINK_DEFAULT: 0x555555,
             LINK_SAFE: 0x0055ff,
             LINK_MINE: 0xff1111
@@ -1471,6 +1470,9 @@
                 let leftPalmUp = false;
                 let palmTargetPos = null;
 
+                // Stricter threshold: ~47 degrees or more facing skyward to prevent accidental triggering
+                const UPWARD_THRESHOLD = 0.68;
+
                 // 1. Hand Tracking: check left hand joints
                 for (let hand of this.hands) {
                     if (hand.userData?.handedness === 'left' && hand.joints) {
@@ -1483,14 +1485,16 @@
                             indexK.getWorldPosition(this.palmP2);
                             pinkyK.getWorldPosition(this.palmP3);
 
+                            // v1: wrist -> index knuckle, v2: wrist -> pinky knuckle
                             const v1 = this.palmP2.sub(this.palmP1);
                             const v2 = this.palmP3.sub(this.palmP1);
-                            this.palmNormal.crossVectors(v1, v2).normalize();
 
-                            // Normal pointing world upward = palm facing sky
-                            if (this.palmNormal.y > 0.45) {
+                            // Corrected cross product order (v2 x v1) so the normal points outward from the palm
+                            this.palmNormal.crossVectors(v2, v1).normalize();
+
+                            if (this.palmNormal.y > UPWARD_THRESHOLD) {
                                 leftPalmUp = true;
-                                this.palmWorldPos.copy(this.palmP1).add(this.palmNormal.multiplyScalar(0.06));
+                                this.palmWorldPos.copy(this.palmP1).addScaledVector(this.palmNormal, 0.08);
                                 palmTargetPos = this.palmWorldPos;
                                 break;
                             }
@@ -1502,14 +1506,15 @@
                 if (!leftPalmUp) {
                     for (let controller of this.controllers) {
                         if (controller.userData?.handedness === 'left') {
-                            this.controllerPalmDir.set(0.7, 0.7, 0).normalize();
+                            // Upward-dominant direction of the palm when holding the left grip
+                            this.controllerPalmDir.set(0.2, 0.95, 0.2).normalize();
                             const quat = controller.getWorldQuaternion(new THREE.Quaternion());
                             this.controllerPalmDir.applyQuaternion(quat);
 
-                            if (this.controllerPalmDir.y > 0.45) {
+                            if (this.controllerPalmDir.y > UPWARD_THRESHOLD) {
                                 leftPalmUp = true;
                                 this.palmWorldPos.setFromMatrixPosition(controller.matrixWorld);
-                                this.palmWorldPos.addScaledVector(this.controllerPalmDir, 0.08);
+                                this.palmWorldPos.addScaledVector(this.controllerPalmDir, 0.10);
                                 palmTargetPos = this.palmWorldPos;
                                 break;
                             }
