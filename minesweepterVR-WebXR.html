@@ -147,7 +147,7 @@
             display: none;
             flex-direction: column;
             gap: 16px;
-            min-width: 350px;
+            min-width: 380px;
             max-width: 90vw;
         }
 
@@ -203,6 +203,8 @@
             .stats-hud { gap: 8px; font-size: 10px; }
             .stat-item span { font-size: 12px; }
             .btn { padding: 6px 10px; font-size: 11px; }
+            .diff-grid { grid-template-columns: 1fr; }
+            .diff-grid .btn { grid-column: span 1 !important; }
         }
     </style>
 
@@ -278,10 +280,11 @@
     <div id="modal-difficulty" class="modal interactive">
         <h2>SELECT DIFFICULTY</h2>
         <div class="diff-grid">
-            <button class="btn" data-diff="easy">Easy (4 Mines)</button>
-            <button class="btn" data-diff="medium">Medium (12 Mines)</button>
-            <button class="btn" data-diff="hard">Hard (28 Mines)</button>
-            <button class="btn" data-diff="insane">Insane (55 Mines)</button>
+            <button class="btn" data-diff="easy">Easy (5 Mines / 21 Nodes)</button>
+            <button class="btn" data-diff="medium">Medium (30 Mines / 85 Nodes)</button>
+            <button class="btn" data-diff="hard">Hard (45 Mines / 121 Nodes)</button>
+            <button class="btn" data-diff="vhard">Very Hard (130 Mines / 364 Nodes)</button>
+            <button class="btn" data-diff="insane" style="grid-column: span 2;">Insane (500 Mines / 1,093 Nodes)</button>
         </div>
         <div class="modal-buttons">
             <button class="btn modal-close">Back</button>
@@ -397,8 +400,8 @@
             LINK_MINE: 0xff1111
         };
 
-        const NODE_RADIUS = 0.05;  // 5 cm radius
-        const LINK_RADIUS = 0.007; // 7 mm link radius
+        const NODE_RADIUS = 0.045; // 4.5 cm radius
+        const LINK_RADIUS = 0.006; // 6 mm link radius
 
         const TEXTURE_CACHE = new Map();
         const MATERIAL_CACHE = new Map();
@@ -467,30 +470,35 @@
                 // Menu visibility & state
                 this.isSpatialMenuOpen = true;
 
-                // 4 Generation algorithms & 4 Difficulty Presets
+                // 4 Generation algorithms & 5 Difficulty Presets (Aligned with C# Unity parameters)
                 this.genAlgorithm = 'tree';
                 this.currentDiff = 'easy';
 
                 this.difficulties = {
                     easy: {
-                        mines: 4,
-                        tree: { maxNodes: 24, levels: 2, branches: 3, linkLength: 0.48, minNodeDist: 0.36, maxSecDist: 0.69 },
-                        poisson: { maxNodes: 24, radius: 0.42, boxSize: 1.65, connMult: 1.6 }
+                        mines: 5,
+                        tree: { maxNodes: 21, levels: 2, branches: 4, linkLength: 0.48, minNodeDist: 0.36, maxSecDist: 0.69 },
+                        poisson: { maxNodes: 21, radius: 0.42, boxSize: 1.65, connMult: 1.6 }
                     },
                     medium: {
-                        mines: 12,
-                        tree: { maxNodes: 48, levels: 3, branches: 3, linkLength: 0.45, minNodeDist: 0.33, maxSecDist: 0.66 },
-                        poisson: { maxNodes: 48, radius: 0.39, boxSize: 2.04, connMult: 1.6 }
+                        mines: 30,
+                        tree: { maxNodes: 85, levels: 3, branches: 4, linkLength: 0.44, minNodeDist: 0.30, maxSecDist: 0.62 },
+                        poisson: { maxNodes: 85, radius: 0.30, boxSize: 2.30, connMult: 1.55 }
                     },
                     hard: {
-                        mines: 28,
-                        tree: { maxNodes: 95, levels: 4, branches: 3, linkLength: 0.42, minNodeDist: 0.30, maxSecDist: 0.63 },
-                        poisson: { maxNodes: 95, radius: 0.36, boxSize: 2.46, connMult: 1.55 }
+                        mines: 45,
+                        tree: { maxNodes: 121, levels: 4, branches: 3, linkLength: 0.40, minNodeDist: 0.26, maxSecDist: 0.58 },
+                        poisson: { maxNodes: 121, radius: 0.27, boxSize: 2.65, connMult: 1.55 }
+                    },
+                    vhard: {
+                        mines: 130,
+                        tree: { maxNodes: 364, levels: 5, branches: 3, linkLength: 0.36, minNodeDist: 0.22, maxSecDist: 0.52 },
+                        poisson: { maxNodes: 364, radius: 0.21, boxSize: 3.45, connMult: 1.5 }
                     },
                     insane: {
-                        mines: 55,
-                        tree: { maxNodes: 160, levels: 5, branches: 3, linkLength: 0.39, minNodeDist: 0.27, maxSecDist: 0.60 },
-                        poisson: { maxNodes: 160, radius: 0.33, boxSize: 2.94, connMult: 1.55 }
+                        mines: 500,
+                        tree: { maxNodes: 1093, levels: 6, branches: 3, linkLength: 0.30, minNodeDist: 0.16, maxSecDist: 0.44 },
+                        poisson: { maxNodes: 1093, radius: 0.15, boxSize: 4.60, connMult: 1.45 }
                     }
                 };
 
@@ -506,7 +514,7 @@
                 this.tempVec = new THREE.Vector3();
                 this.tempNodePos = new THREE.Vector3();
                 this.workingMatrix = new THREE.Matrix4();
-                this.sharedSphereGeo = new THREE.SphereGeometry(NODE_RADIUS, 20, 20);
+                this.sharedSphereGeo = new THREE.SphereGeometry(NODE_RADIUS, 18, 18);
 
                 // Palm orientation math
                 this.palmP1 = new THREE.Vector3();
@@ -711,9 +719,9 @@
                 ctx.textBaseline = 'middle';
 
                 if (sub) {
-                    ctx.font = 'bold 24px monospace';
+                    ctx.font = 'bold 22px monospace';
                     ctx.fillText(label, x + w / 2, y + h / 2 - 10);
-                    ctx.font = '16px monospace';
+                    ctx.font = '15px monospace';
                     ctx.fillStyle = active ? '#111111' : '#88ffaa';
                     ctx.fillText(sub, x + w / 2, y + h / 2 + 14);
                 } else {
@@ -745,6 +753,8 @@
                 }
                 const leftMines = Math.max(0, curMines - flagged);
 
+                const diffLabels = { easy: 'Easy', medium: 'Medium', hard: 'Hard', vhard: 'V-Hard', insane: 'Insane' };
+
                 if (this.vrUIPage === 'hud') {
                     ctx.fillStyle = '#00ff66';
                     ctx.font = 'bold 26px monospace';
@@ -754,7 +764,7 @@
                     const genLabels = { 'tree': 'Tree', 'poisson-uniform': 'P-Uniform', 'poisson-seq': 'P-Sequential', 'poisson-biased': 'P-Biased' };
                     this.registerVJButton('toggle-tool', 40, 80, 450, 70, this.flagMode ? '🚩 TOOL: FLAGGING' : '⛏️ TOOL: REVEALING', this.flagMode);
                     this.registerVJButton('open-gen', 534, 80, 450, 70, `GEN: ${genLabels[this.genAlgorithm]}`, false);
-                    this.registerVJButton('open-diff', 40, 175, 450, 70, `DIFFICULTY: ${this.currentDiff.toUpperCase()}`, false);
+                    this.registerVJButton('open-diff', 40, 175, 450, 70, `DIFFICULTY: ${diffLabels[this.currentDiff].toUpperCase()}`, false);
                     this.registerVJButton('open-tut', 534, 175, 450, 70, '3D RULES / TUTORIAL', false);
                     this.registerVJButton('new-game', 40, 270, 944, 90, '⚡ RE-GENERATE / NEW GAME ⚡', true);
                 } else if (this.vrUIPage === 'gen') {
@@ -772,13 +782,19 @@
                     ctx.fillStyle = '#00ff66';
                     ctx.font = 'bold 28px monospace';
                     ctx.textAlign = 'center';
-                    ctx.fillText('SELECT DIFFICULTY PRESET', 480, 42);
+                    ctx.fillText('SELECT DIFFICULTY PRESET', 480, 38);
 
-                    this.registerVJButton('set-diff-easy', 40, 75, 450, 85, 'EASY', this.currentDiff === 'easy', '4 Mines (~24 Nodes)');
-                    this.registerVJButton('set-diff-medium', 534, 75, 450, 85, 'MEDIUM', this.currentDiff === 'medium', '12 Mines (~48 Nodes)');
-                    this.registerVJButton('set-diff-hard', 40, 185, 450, 85, 'HARD', this.currentDiff === 'hard', '28 Mines (~95 Nodes)');
-                    this.registerVJButton('set-diff-insane', 534, 185, 450, 85, 'INSANE', this.currentDiff === 'insane', '55 Mines (~160 Nodes)');
-                    this.registerVJButton('close-page', 40, 300, 944, 75, 'BACK TO DASHBOARD', false);
+                    // Row 1: Easy, Medium, Hard
+                    this.registerVJButton('set-diff-easy', 40, 60, 296, 80, 'EASY', this.currentDiff === 'easy', '5 Mines (21 Nodes)');
+                    this.registerVJButton('set-diff-medium', 364, 60, 296, 80, 'MEDIUM', this.currentDiff === 'medium', '30 Mines (85 Nodes)');
+                    this.registerVJButton('set-diff-hard', 688, 60, 296, 80, 'HARD', this.currentDiff === 'hard', '45 Mines (121 Nodes)');
+
+                    // Row 2: Very Hard, Insane
+                    this.registerVJButton('set-diff-vhard', 40, 160, 450, 85, 'VERY HARD', this.currentDiff === 'vhard', '130 Mines (364 Nodes)');
+                    this.registerVJButton('set-diff-insane', 534, 160, 450, 85, 'INSANE', this.currentDiff === 'insane', '500 Mines (1,093 Nodes)');
+
+                    // Row 3: Back Button
+                    this.registerVJButton('close-page', 40, 275, 944, 75, 'BACK TO DASHBOARD', false);
                 } else if (this.vrUIPage === 'tut') {
                     ctx.fillStyle = '#00ff66';
                     ctx.font = 'bold 26px monospace';
@@ -1176,7 +1192,8 @@
             ------------------------------------------------------------- */
             plantMines(safeId) {
                 const cfg = this.difficulties[this.currentDiff];
-                const totalMines = Math.min(cfg.mines, Math.max(1, this.nodes.length - 2));
+                const maxPossibleMines = Math.max(1, this.nodes.length - 1 - this.nodes[safeId].neighbors.length);
+                const totalMines = Math.min(cfg.mines, maxPossibleMines);
                 let planted = 0;
 
                 while (planted < totalMines) {
@@ -1333,18 +1350,20 @@
                 detonatedNode.mesh.material.color.setHex(COLORS.NODE_MINE);
                 this.createExplosionParticles(detonatedNode.mesh.getWorldPosition(new THREE.Vector3()), 0xff2200);
 
-                let delay = 150, count = 0;
-                this.nodes.forEach(n => {
-                    if (n.isMine && n.id !== detonatedId) {
-                        count++;
-                        setTimeout(() => {
-                            n.mesh.material.color.setHex(COLORS.NODE_MINE);
-                            this.createExplosionParticles(n.mesh.getWorldPosition(new THREE.Vector3()), 0xff0044);
-                            sfx.playTone(140 + Math.random() * 200, 'sawtooth', 0.08, 0.08);
-                        }, count * delay);
-                    }
-                });
+                const otherMines = this.nodes.filter(n => n.isMine && n.id !== detonatedId);
+                const maxStagedExplosions = Math.min(16, otherMines.length);
+                const delay = 100;
 
+                for (let i = 0; i < maxStagedExplosions; i++) {
+                    const n = otherMines[i];
+                    setTimeout(() => {
+                        n.mesh.material.color.setHex(COLORS.NODE_MINE);
+                        this.createExplosionParticles(n.mesh.getWorldPosition(new THREE.Vector3()), 0xff0044);
+                        sfx.playTone(140 + Math.random() * 200, 'sawtooth', 0.08, 0.08);
+                    }, (i + 1) * delay);
+                }
+
+                const totalWait = (maxStagedExplosions + 1) * delay + 250;
                 setTimeout(() => {
                     this.revealFullBoard();
                     this.endGameData = { title: 'MISSION FAILED', message: 'Mine core detonation triggered!', color: '#ff2222' };
@@ -1355,7 +1374,7 @@
 
                     this.vrUIPage = 'gameover';
                     this.openSpatialMenu();
-                }, (count + 1) * delay + 200);
+                }, totalWait);
             }
 
             revealFullBoard() {
@@ -1378,7 +1397,7 @@
             }
 
             createExplosionParticles(worldPos, hex) {
-                const count = 40;
+                const count = 35;
                 const pGeo = new THREE.BufferGeometry();
                 const pos = new Float32Array(count * 3);
                 const vels = [];
@@ -1471,14 +1490,12 @@
                 let isLeftHandTracked = false;
                 let palmTargetPos = null;
 
-                // Stricter threshold: ~47 degrees or more facing skyward to prevent accidental triggering
                 const UPWARD_THRESHOLD = 0.68;
 
                 // 1. Hand Tracking Mode: check left hand joints
                 for (let hand of this.hands) {
                     if (hand.userData?.handedness === 'left' && hand.joints) {
                         const wrist = hand.joints['wrist'];
-                        // Use MCP knuckle joints to establish a wide, stable palm plane
                         const indexKnuckle = hand.joints['index-finger-phalanx-proximal'];
                         const pinkyKnuckle = hand.joints['pinky-finger-phalanx-proximal'];
 
@@ -1487,15 +1504,12 @@
                             indexKnuckle.getWorldPosition(this.palmP2);
                             pinkyKnuckle.getWorldPosition(this.palmP3);
 
-                            // Verify joints are actively tracked in world space
                             if (this.palmP1.lengthSq() > 0.001) {
                                 isLeftHandTracked = true;
 
-                                // v1: wrist -> index knuckle, v2: wrist -> pinky knuckle
                                 const v1 = this.tempVec.subVectors(this.palmP2, this.palmP1);
                                 const v2 = this.localDir.subVectors(this.palmP3, this.palmP1);
 
-                                // Normal vector (v2 x v1) points outward perpendicularly from the palm
                                 this.palmNormal.crossVectors(v2, v1).normalize();
 
                                 if (this.palmNormal.y > UPWARD_THRESHOLD) {
@@ -1512,9 +1526,7 @@
                 // 2. Controller Mode: ONLY execute if left hand optical tracking is NOT active
                 if (!isLeftHandTracked && !leftPalmUp) {
                     for (let controller of this.controllers) {
-                        // Ensure controller has an active physical gamepad and is the left hand
                         if (controller.userData?.handedness === 'left' && controller.userData?.gamepad) {
-                            // Left palm faces the controller's local +X axis (inner right side toward user body center)
                             this.controllerPalmDir.set(0.95, 0.2, 0.2).normalize();
                             const quat = controller.getWorldQuaternion(new THREE.Quaternion());
                             this.controllerPalmDir.applyQuaternion(quat);
@@ -1776,7 +1788,9 @@
                 }
                 document.getElementById('hud-mines').textContent = Math.max(0, curMines - flagged);
                 document.getElementById('hud-nodes').textContent = unrevealed;
-                document.getElementById('hud-diff').textContent = this.currentDiff.toUpperCase();
+
+                const diffLabels = { easy: 'Easy', medium: 'Medium', hard: 'Hard', vhard: 'V-Hard', insane: 'Insane' };
+                document.getElementById('hud-diff').textContent = diffLabels[this.currentDiff] || this.currentDiff.toUpperCase();
 
                 const genLabels = { 'tree': 'Tree', 'poisson-uniform': 'P-Uniform', 'poisson-seq': 'P-Sequential', 'poisson-biased': 'P-Biased' };
                 document.getElementById('hud-gen').textContent = genLabels[this.genAlgorithm] || 'Tree';
