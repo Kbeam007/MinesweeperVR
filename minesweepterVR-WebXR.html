@@ -1514,7 +1514,8 @@
                     for (let controller of this.controllers) {
                         // Ensure controller has an active physical gamepad and is the left hand
                         if (controller.userData?.handedness === 'left' && controller.userData?.gamepad) {
-                            this.controllerPalmDir.set(0.2, 0.95, 0.2).normalize();
+                            // Left palm faces the controller's local +X axis (inner right side toward user body center)
+                            this.controllerPalmDir.set(0.95, 0.2, 0.2).normalize();
                             const quat = controller.getWorldQuaternion(new THREE.Quaternion());
                             this.controllerPalmDir.applyQuaternion(quat);
 
