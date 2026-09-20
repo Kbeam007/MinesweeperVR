@@ -592,20 +592,20 @@
                         color: 0x00ff66,
                         transparent: true,
                         opacity: 0.85,
-                        depthTest: false,
+                        depthTest: true,
                         depthWrite: false
                     });
                     const laser = new THREE.Line(lineGeo, lineMat);
                     laser.name = 'laser';
                     laser.scale.z = 4.5;
-                    laser.renderOrder = 10000;
+                    laser.renderOrder = 0;
                     controller.add(laser);
 
                     const reticleGeo = new THREE.RingGeometry(0.008, 0.015, 24);
                     const reticleMat = new THREE.MeshBasicMaterial({
                         color: 0x00ff66,
                         side: THREE.DoubleSide,
-                        depthTest: false,
+                        depthTest: true,
                         depthWrite: false,
                         transparent: true,
                         opacity: 0.95
@@ -613,7 +613,7 @@
                     const reticle = new THREE.Mesh(reticleGeo, reticleMat);
                     reticle.name = 'reticle';
                     reticle.visible = false;
-                    reticle.renderOrder = 10001;
+                    reticle.renderOrder = 1;
                     this.scene.add(reticle);
                     controller.userData.reticle = reticle;
 
@@ -631,6 +631,7 @@
                         controller.userData.gamepad = e.data.gamepad;
                         controller.userData.handedness = e.data.handedness;
                         this.applyHandTheming(controller, grip, e.data.handedness);
+                        this.updateControllerVisualHierarchy();
                     });
                     controller.addEventListener('disconnected', () => {
                         controller.userData.gamepad = null;
@@ -643,6 +644,7 @@
                     hand.addEventListener('connected', (e) => {
                         hand.userData.handedness = e.data.handedness;
                         this.applyHandModelTheming(hand, e.data.handedness);
+                        this.updateControllerVisualHierarchy();
                     });
                     hand.addEventListener('disconnected', () => {
                         hand.userData.handedness = null;
@@ -942,14 +944,15 @@
             }
 
             updateControllerVisualHierarchy() {
-                const overlayHUD = this.isSpatialMenuOpen && this.hudMesh.visible;
+                const overlayHUD = this.isSpatialMenuOpen && this.hudMesh && this.hudMesh.visible;
                 const targetRenderOrder = overlayHUD ? 10000 : 0;
                 const targetDepthTest = !overlayHUD;
 
-                const applyVisualProps = (obj) => {
+                const applyVisualProps = (obj, orderOffset = 0) => {
+                    if (!obj) return;
                     obj.traverse((child) => {
                         if (child.isMesh || child.isLine) {
-                            child.renderOrder = targetRenderOrder;
+                            child.renderOrder = targetRenderOrder + orderOffset;
                             if (child.material) {
                                 child.material.depthTest = targetDepthTest;
                                 child.material.needsUpdate = true;
@@ -960,6 +963,14 @@
 
                 for (let grip of this.controllerGrips) applyVisualProps(grip);
                 for (let hand of this.hands) applyVisualProps(hand);
+                
+                // Lasers & Reticles update depthTest/renderOrder with menu visibility
+                for (let controller of this.controllers) {
+                    applyVisualProps(controller);
+                    if (controller.userData?.reticle) {
+                        applyVisualProps(controller.userData.reticle, 1);
+                    }
+                }
             }
 
             openSpatialMenu() {
