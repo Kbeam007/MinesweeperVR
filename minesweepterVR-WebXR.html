@@ -1470,31 +1470,37 @@
                 let leftPalmUp = false;
                 let palmTargetPos = null;
 
-                // Stricter threshold: ~47 degrees or more facing skyward to prevent accidental triggering
-                const UPWARD_THRESHOLD = 0.68;
+                // Threshold: normal vector must face upward (> 0.60 corresponds to ~53 deg or higher)
+                const UPWARD_THRESHOLD = 0.60;
 
-                // 1. Hand Tracking: check left hand joints
+                // 1. Direct Hand Tracking Mode (Left Hand)
                 for (let hand of this.hands) {
                     if (hand.userData?.handedness === 'left' && hand.joints) {
                         const wrist = hand.joints['wrist'];
                         const indexK = hand.joints['index-finger-metacarpal'];
                         const pinkyK = hand.joints['pinky-finger-metacarpal'];
+                        const middleK = hand.joints['middle-finger-metacarpal'];
 
                         if (wrist && indexK && pinkyK) {
                             wrist.getWorldPosition(this.palmP1);
                             indexK.getWorldPosition(this.palmP2);
                             pinkyK.getWorldPosition(this.palmP3);
 
-                            // v1: wrist -> index knuckle, v2: wrist -> pinky knuckle
-                            const v1 = this.palmP2.sub(this.palmP1);
-                            const v2 = this.palmP3.sub(this.palmP1);
+                            // Forward vector: from wrist towards knuckles
+                            const vForward = middleK
+                                ? middleK.getWorldPosition(new THREE.Vector3()).sub(this.palmP1).normalize()
+                                : this.palmP2.clone().add(this.palmP3).multiplyScalar(0.5).sub(this.palmP1).normalize();
 
-                            // Corrected cross product order (v2 x v1) so the normal points outward from the palm
-                            this.palmNormal.crossVectors(v2, v1).normalize();
+                            // Side vector across the palm from pinky to index knuckle
+                            const vAcross = this.palmP2.clone().sub(this.palmP3).normalize();
+
+                            // For a LEFT hand: Cross(Across, Forward) points straight outward from the palm face
+                            this.palmNormal.crossVectors(vAcross, vForward).normalize();
 
                             if (this.palmNormal.y > UPWARD_THRESHOLD) {
                                 leftPalmUp = true;
-                                this.palmWorldPos.copy(this.palmP1).addScaledVector(this.palmNormal, 0.08);
+                                const palmCenter = this.palmP1.clone().addScaledVector(vForward, 0.04);
+                                this.palmWorldPos.copy(palmCenter).addScaledVector(this.palmNormal, 0.07);
                                 palmTargetPos = this.palmWorldPos;
                                 break;
                             }
@@ -1502,19 +1508,22 @@
                     }
                 }
 
-                // 2. Controller Mode: check left controller supination
+                // 2. Controller Mode (Left Controller)
                 if (!leftPalmUp) {
                     for (let controller of this.controllers) {
                         if (controller.userData?.handedness === 'left') {
-                            // Upward-dominant direction of the palm when holding the left grip
-                            this.controllerPalmDir.set(0.2, 0.95, 0.2).normalize();
+                            // In WebXR/OpenXR standard spaces:
+                            // When holding a left controller, the inner palm faces right (+X).
+                            // Angled slightly upward (+Y) and forward (-Z) to follow natural inner palm curvature.
+                            this.controllerPalmDir.set(0.92, 0.28, -0.26).normalize();
+
                             const quat = controller.getWorldQuaternion(new THREE.Quaternion());
                             this.controllerPalmDir.applyQuaternion(quat);
 
                             if (this.controllerPalmDir.y > UPWARD_THRESHOLD) {
                                 leftPalmUp = true;
                                 this.palmWorldPos.setFromMatrixPosition(controller.matrixWorld);
-                                this.palmWorldPos.addScaledVector(this.controllerPalmDir, 0.10);
+                                this.palmWorldPos.addScaledVector(this.controllerPalmDir, 0.08);
                                 palmTargetPos = this.palmWorldPos;
                                 break;
                             }
