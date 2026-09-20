@@ -734,7 +734,7 @@
 
                 this.virtualButtons = [];
 
-                // Always register the Close [X] Button in the top right corner
+                // Close [X] Button in the top right corner
                 this.registerVJButton('close-hud-window', 958, 14, 52, 44, '✕');
 
                 const curMines = this.difficulties[this.currentDiff].mines;
@@ -1468,45 +1468,52 @@
                 }
 
                 let leftPalmUp = false;
+                let isLeftHandTracked = false;
                 let palmTargetPos = null;
 
                 // Stricter threshold: ~47 degrees or more facing skyward to prevent accidental triggering
                 const UPWARD_THRESHOLD = 0.68;
 
-                // 1. Hand Tracking: check left hand joints
+                // 1. Hand Tracking Mode: check left hand joints
                 for (let hand of this.hands) {
                     if (hand.userData?.handedness === 'left' && hand.joints) {
                         const wrist = hand.joints['wrist'];
-                        const indexK = hand.joints['index-finger-metacarpal'];
-                        const pinkyK = hand.joints['pinky-finger-metacarpal'];
+                        // Use MCP knuckle joints to establish a wide, stable palm plane
+                        const indexKnuckle = hand.joints['index-finger-phalanx-proximal'];
+                        const pinkyKnuckle = hand.joints['pinky-finger-phalanx-proximal'];
 
-                        if (wrist && indexK && pinkyK) {
+                        if (wrist && indexKnuckle && pinkyKnuckle) {
                             wrist.getWorldPosition(this.palmP1);
-                            indexK.getWorldPosition(this.palmP2);
-                            pinkyK.getWorldPosition(this.palmP3);
+                            indexKnuckle.getWorldPosition(this.palmP2);
+                            pinkyKnuckle.getWorldPosition(this.palmP3);
 
-                            // v1: wrist -> index knuckle, v2: wrist -> pinky knuckle
-                            const v1 = this.palmP2.sub(this.palmP1);
-                            const v2 = this.palmP3.sub(this.palmP1);
+                            // Verify joints are actively tracked in world space
+                            if (this.palmP1.lengthSq() > 0.001) {
+                                isLeftHandTracked = true;
 
-                            // Corrected cross product order (v2 x v1) so the normal points outward from the palm
-                            this.palmNormal.crossVectors(v2, v1).normalize();
+                                // v1: wrist -> index knuckle, v2: wrist -> pinky knuckle
+                                const v1 = this.tempVec.subVectors(this.palmP2, this.palmP1);
+                                const v2 = this.localDir.subVectors(this.palmP3, this.palmP1);
 
-                            if (this.palmNormal.y > UPWARD_THRESHOLD) {
-                                leftPalmUp = true;
-                                this.palmWorldPos.copy(this.palmP1).addScaledVector(this.palmNormal, 0.08);
-                                palmTargetPos = this.palmWorldPos;
+                                // Normal vector (v2 x v1) points outward perpendicularly from the palm
+                                this.palmNormal.crossVectors(v2, v1).normalize();
+
+                                if (this.palmNormal.y > UPWARD_THRESHOLD) {
+                                    leftPalmUp = true;
+                                    this.palmWorldPos.copy(this.palmP1).addScaledVector(this.palmNormal, 0.08);
+                                    palmTargetPos = this.palmWorldPos;
+                                }
                                 break;
                             }
                         }
                     }
                 }
 
-                // 2. Controller Mode: check left controller supination
-                if (!leftPalmUp) {
+                // 2. Controller Mode: ONLY execute if left hand optical tracking is NOT active
+                if (!isLeftHandTracked && !leftPalmUp) {
                     for (let controller of this.controllers) {
-                        if (controller.userData?.handedness === 'left') {
-                            // Upward-dominant direction of the palm when holding the left grip
+                        // Ensure controller has an active physical gamepad and is the left hand
+                        if (controller.userData?.handedness === 'left' && controller.userData?.gamepad) {
                             this.controllerPalmDir.set(0.2, 0.95, 0.2).normalize();
                             const quat = controller.getWorldQuaternion(new THREE.Quaternion());
                             this.controllerPalmDir.applyQuaternion(quat);
@@ -1522,6 +1529,7 @@
                     }
                 }
 
+                // Show or hide palm button badge
                 if (leftPalmUp && palmTargetPos) {
                     this.palmButtonMesh.visible = true;
                     this.palmButtonMesh.position.copy(palmTargetPos);
