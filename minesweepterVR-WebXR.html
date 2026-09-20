@@ -114,7 +114,7 @@
         const sfx = new SoundFX();
 
         /* -------------------------------------------------------------
-           2. Visual Constants & Number Texture Generation
+           2. Visual Constants & Cached Texture Generation
         ------------------------------------------------------------- */
         const COLORS = {
             NODE_UNREVEALED: 0x555555,
@@ -129,7 +129,14 @@
 
         const NODE_RADIUS = 0.08;
 
-        function createNumberSprite(number, color = '#ffffff') {
+        // Texture and Material caches to avoid runtime allocations and Quest GPU stalls
+        const TEXTURE_CACHE = new Map();
+        const MATERIAL_CACHE = new Map();
+
+        function getNumberTexture(number, color = '#ffffff') {
+            const key = `${number}_${color}`;
+            if (TEXTURE_CACHE.has(key)) return TEXTURE_CACHE.get(key);
+
             const canvas = document.createElement('canvas');
             canvas.width = 128;
             canvas.height = 128;
@@ -144,16 +151,28 @@
 
             const tex = new THREE.CanvasTexture(canvas);
             tex.minFilter = THREE.LinearFilter;
+            tex.generateMipmaps = false; // Optimize upload time on mobile VR
+            TEXTURE_CACHE.set(key, tex);
+            return tex;
+        }
 
-            // depthTest enabled for real 3D occlusion behind other spheres
-            // depthWrite disabled so transparent quad doesn't clip background elements
+        function getNumberMaterial(number, color = '#ffffff') {
+            const key = `${number}_${color}`;
+            if (MATERIAL_CACHE.has(key)) return MATERIAL_CACHE.get(key);
+
+            const tex = getNumberTexture(number, color);
             const mat = new THREE.SpriteMaterial({
                 map: tex,
                 depthTest: true,
                 depthWrite: false,
                 transparent: true
             });
+            MATERIAL_CACHE.set(key, mat);
+            return mat;
+        }
 
+        function createNumberSprite(number, color = '#ffffff') {
+            const mat = getNumberMaterial(number, color);
             const sprite = new THREE.Sprite(mat);
             sprite.scale.set(NODE_RADIUS * 1.5, NODE_RADIUS * 1.5, 1);
             return sprite;
@@ -179,6 +198,8 @@
                 // Reusable vectors for zero GC overhead during render loop
                 this.camPos = new THREE.Vector3();
                 this.localDir = new THREE.Vector3();
+                this.tempVec = new THREE.Vector3();
+                this.tempNodePos = new THREE.Vector3();
 
                 this.initGraphics();
                 this.initWebXR();
@@ -225,16 +246,17 @@
 
                 this.raycaster = new THREE.Raycaster();
                 this.workingMatrix = new THREE.Matrix4();
-                this.tempVec = new THREE.Vector3();
 
                 for (let i = 0; i < 2; i++) {
                     const controller = this.renderer.xr.getController(i);
                     this.scene.add(controller);
 
-                    const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1.5)]);
+                    // Length 1.0 so laser.scale.z matches distance directly
+                    const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
                     const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff66, transparent: true, opacity: 0.5 });
                     const laser = new THREE.Line(lineGeo, lineMat);
                     laser.name = 'laser';
+                    laser.scale.z = 1.5;
                     controller.add(laser);
 
                     const grip = this.renderer.xr.getControllerGrip(i);
@@ -244,6 +266,13 @@
                     const hand = this.renderer.xr.getHand(i);
                     hand.add(this.handModelFactory.createHandModel(hand, "mesh"));
                     this.scene.add(hand);
+
+                    controller.addEventListener('connected', (e) => {
+                        controller.userData.gamepad = e.data.gamepad;
+                    });
+                    controller.addEventListener('disconnected', () => {
+                        controller.userData.gamepad = null;
+                    });
 
                     controller.addEventListener('selectstart', () => this.onXRTriggerDown(controller));
                     controller.addEventListener('squeezestart', () => this.onXRGripStart(controller));
@@ -315,8 +344,6 @@
 
                 const sphereGeo = new THREE.SphereGeometry(NODE_RADIUS, 24, 24);
                 
-                // polygonOffset pushes the sphere depth slightly back, ensuring the front-facing numbers
-                // never get depth-clipped by their own sphere, while still occluding correctly against other spheres!
                 const baseNodeMat = new THREE.MeshStandardMaterial({
                     color: COLORS.NODE_UNREVEALED,
                     roughness: 0.3,
@@ -474,26 +501,35 @@
             }
 
             attachNumberSprite(node, color) {
-                if (node.sprite) node.mesh.remove(node.sprite);
+                if (node.sprite) {
+                    node.mesh.remove(node.sprite);
+                    node.sprite = null;
+                }
                 const sprite = createNumberSprite(node.adjMines, color);
                 node.mesh.add(sprite);
                 node.sprite = sprite;
                 
-                // Immediately orient to face camera
                 this.orientSprite(node);
+            }
+
+            getActiveCamera() {
+                return (this.renderer.xr && this.renderer.xr.isPresenting) 
+                    ? this.renderer.xr.getCamera() 
+                    : this.camera;
             }
 
             orientSprite(node) {
                 if (!node.sprite || !node.sprite.visible) return;
-                this.camera.getWorldPosition(this.camPos);
+                const cam = this.getActiveCamera();
+                cam.getWorldPosition(this.camPos);
 
-                // Transform the camera's world position directly into this specific node's local coordinate space
                 this.localDir.copy(this.camPos);
                 node.mesh.worldToLocal(this.localDir);
 
-                // Normalize and place directly on the outer surface toward the player
-                this.localDir.normalize().multiplyScalar(NODE_RADIUS + 0.008);
-                node.sprite.position.copy(this.localDir);
+                if (this.localDir.lengthSq() > 0.0001) {
+                    this.localDir.normalize().multiplyScalar(NODE_RADIUS + 0.008);
+                    node.sprite.position.copy(this.localDir);
+                }
             }
 
             updateAllSprites() {
@@ -504,8 +540,9 @@
 
             revealBoardOnLoss() {
                 for (let n of this.nodes) {
-                    if (n.isMine) n.mesh.material.color.setHex(COLORS.NODE_MINE);
-                    else {
+                    if (n.isMine) {
+                        n.mesh.material.color.setHex(COLORS.NODE_MINE);
+                    } else {
                         n.mesh.material.color.setHex(COLORS.NODE_REVEALED);
                         this.attachNumberSprite(n, '#ffffff');
                     }
@@ -544,21 +581,27 @@
 
             triggerHaptic(controller, intensity = 0.5, duration = 30) {
                 const gamepad = controller.userData?.gamepad;
-                if (gamepad && gamepad.hapticActuators && gamepad.hapticActuators[0]) {
-                    gamepad.hapticActuators[0].pulse(intensity, duration);
-                }
+                try {
+                    if (gamepad?.hapticActuators?.[0]?.pulse) {
+                        gamepad.hapticActuators[0].pulse(intensity, duration);
+                    }
+                } catch(e) {}
             }
 
             handleVRInteractions() {
                 let foundHover = null;
                 const nodeMeshes = this.nodes.map(n => n.mesh);
 
+                // Set raycaster camera to the XR camera so Three.js raycasting internals don't error
+                this.raycaster.camera = this.getActiveCamera();
+
                 for (let controller of this.controllers) {
                     this.workingMatrix.identity().extractRotation(controller.matrixWorld);
                     this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
                     this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.workingMatrix);
 
-                    const hits = this.raycaster.intersectObjects(nodeMeshes);
+                    // FIX: recursive=false ensures we only intersect sphere meshes, never child number sprites!
+                    const hits = this.raycaster.intersectObjects(nodeMeshes, false);
                     if (hits.length > 0) {
                         foundHover = this.nodes[hits[0].object.userData.nodeId];
                         const laser = controller.getObjectByName('laser');
@@ -570,14 +613,14 @@
                     }
                 }
 
-                // Direct Hand-Tracking Poke Detection
+                // Direct Hand-Tracking Poke Detection (GC-optimized)
                 for (let hand of this.hands) {
                     if (hand.joints) {
                         const indexTip = hand.joints['index-finger-tip'];
                         if (indexTip) {
                             const tipPos = this.tempVec.setFromMatrixPosition(indexTip.matrixWorld);
                             for (let n of this.nodes) {
-                                const nWorld = n.mesh.getWorldPosition(new THREE.Vector3());
+                                const nWorld = n.mesh.getWorldPosition(this.tempNodePos);
                                 if (tipPos.distanceTo(nWorld) < NODE_RADIUS * 1.3) {
                                     foundHover = n;
                                     if (!n.isRevealed && !n.isFlagged) {
@@ -620,7 +663,9 @@
                     mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
                     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
                     dRay.setFromCamera(mouse, this.camera);
-                    const hits = dRay.intersectObjects(this.nodes.map(n => n.mesh));
+
+                    // recursive=false so clicks hit spheres instead of child sprites
+                    const hits = dRay.intersectObjects(this.nodes.map(n => n.mesh), false);
                     if (hits.length > 0) {
                         const id = hits[0].object.userData.nodeId;
                         if (e.button === 2 || this.flagMode) this.toggleFlag(id);
@@ -651,7 +696,7 @@
                     this.controls.update();
                 }
 
-                // Keep numbers pinned on the outer hull facing the camera
+                // Keep numbers pinned on the outer hull facing the active camera
                 this.updateAllSprites();
 
                 this.renderer.render(this.scene, this.camera);
