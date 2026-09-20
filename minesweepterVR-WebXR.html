@@ -425,6 +425,22 @@
                 this.nodes[b].links.push(linkId);
             }
 
+            /* Dynamically colors the connections between nodes */
+            updateLinksColor() {
+                for (let link of this.links) {
+                    const na = this.nodes[link.a];
+                    const nb = this.nodes[link.b];
+
+                    if (na.isFlagged || nb.isFlagged) {
+                        link.mesh.material.color.setHex(COLORS.LINK_MINE);
+                    } else if (na.isRevealed && nb.isRevealed) {
+                        link.mesh.material.color.setHex(COLORS.LINK_SAFE);
+                    } else {
+                        link.mesh.material.color.setHex(COLORS.LINK_DEFAULT);
+                    }
+                }
+            }
+
             plantMines(startNodeId) {
                 let planted = 0;
                 while (planted < this.totalMines) {
@@ -478,6 +494,7 @@
                     }
                 }
 
+                this.updateLinksColor();
                 this.updateHUD();
                 this.checkWin();
             }
@@ -496,6 +513,8 @@
                     node.mesh.material.color.setHex(node.isHinted ? COLORS.NODE_HINT : COLORS.NODE_UNREVEALED);
                     if (node.sprite) node.sprite.visible = true;
                 }
+                
+                this.updateLinksColor();
                 this.updateHUD();
                 this.checkWin();
             }
@@ -547,6 +566,15 @@
                         this.attachNumberSprite(n, '#ffffff');
                     }
                 }
+                for (let l of this.links) {
+                    const na = this.nodes[l.a];
+                    const nb = this.nodes[l.b];
+                    if (na.isMine || nb.isMine) {
+                        l.mesh.material.color.setHex(COLORS.LINK_MINE);
+                    } else {
+                        l.mesh.material.color.setHex(COLORS.LINK_SAFE);
+                    }
+                }
             }
 
             checkWin() {
@@ -592,7 +620,6 @@
                 let foundHover = null;
                 const nodeMeshes = this.nodes.map(n => n.mesh);
 
-                // Set raycaster camera to the XR camera so Three.js raycasting internals don't error
                 this.raycaster.camera = this.getActiveCamera();
 
                 for (let controller of this.controllers) {
@@ -600,7 +627,6 @@
                     this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
                     this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.workingMatrix);
 
-                    // FIX: recursive=false ensures we only intersect sphere meshes, never child number sprites!
                     const hits = this.raycaster.intersectObjects(nodeMeshes, false);
                     if (hits.length > 0) {
                         foundHover = this.nodes[hits[0].object.userData.nodeId];
@@ -613,7 +639,7 @@
                     }
                 }
 
-                // Direct Hand-Tracking Poke Detection (GC-optimized)
+                // Direct Hand-Tracking Poke Detection
                 for (let hand of this.hands) {
                     if (hand.joints) {
                         const indexTip = hand.joints['index-finger-tip'];
@@ -664,7 +690,6 @@
                     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
                     dRay.setFromCamera(mouse, this.camera);
 
-                    // recursive=false so clicks hit spheres instead of child sprites
                     const hits = dRay.intersectObjects(this.nodes.map(n => n.mesh), false);
                     if (hits.length > 0) {
                         const id = hits[0].object.userData.nodeId;
