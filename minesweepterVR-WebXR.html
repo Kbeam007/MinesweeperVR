@@ -238,7 +238,7 @@
 
         <footer>
             <div class="hud-box interactive vr-tip">
-                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Left Stick = Move (Controller Orient.) | Right Stick = Rotate Grid | Grip = Pull Grid
+                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Thumbstick = Rotate Grid | Grip = Pull Grid (Release has zero-G inertia, click Grip again to brake)
             </div>
             <div class="hud-box interactive" style="display:flex; gap: 10px;">
                 <button class="btn active" id="btn-mode-reveal">⛏️ Click: Reveal</button>
@@ -296,9 +296,8 @@
            • <b>Yellow Nodes:</b> Clue nodes showing unrevealed neighboring mine counts.<br>
            • <b style="color:#00d0ff;">🔵 RIGHT HAND (BLUE):</b> Open/Reveal nodes (Trigger or poke).<br>
            • <b style="color:#ff4466;">🔴 LEFT HAND (RED):</b> Flag/Mark mines (Trigger or poke).<br>
-           • <b>VR Left Thumbstick:</b> Move forward/back and strafe left/right in the direction the left controller points.<br>
-           • <b>VR Right Thumbstick:</b> Rotate the whole matrix in place freely.<br>
-           • <b>VR Zero-G Inertia:</b> Squeeze & move the field with Grip. Release to float in linear zero-G. <b>Click Grip again anytime to brake & stop!</b><br>
+           • <b>VR Thumbstick:</b> Rotate the whole matrix in place freely.<br>
+           • <b>VR Zero-G Inertia:</b> Squeeze & throw the field with Grip. Release it to float in weightlessness. <b>Click Grip again anytime to brake & stop!</b><br>
            • <b>Wrist Menu:</b> Flip your left palm upward anytime to summon the dashboard!
         </p>
         <div class="modal-buttons">
@@ -506,10 +505,11 @@
                     }
                 };
 
-                // Grip & Linear Inertia state (Angular drift removed)
+                // Grip & Weightless Inertia state
                 this.grabbedBy = [];
                 this.previousControllerMatrix = new THREE.Matrix4();
                 this.linearVelocity = new THREE.Vector3();
+                this.angularVelocity = new THREE.Vector3();
                 this.isDrifting = false;
 
                 this.vrUIPage = 'hud';
@@ -886,30 +886,29 @@
                     ctx.textAlign = 'center';
                     ctx.fillText('VR CONTROLS & PROTOCOL', 480, 36);
 
-                    ctx.font = 'bold 18px monospace';
+                    ctx.font = 'bold 19px monospace';
                     ctx.fillStyle = '#00c8ff';
                     ctx.textAlign = 'left';
-                    ctx.fillText('• RIGHT CONTROLLER / HAND (BLUE):', 40, 66);
-                    ctx.font = '14px monospace';
+                    ctx.fillText('• RIGHT CONTROLLER / HAND (BLUE):', 40, 70);
+                    ctx.font = '15px monospace';
                     ctx.fillStyle = '#ffffff';
-                    ctx.fillText('  Triggers laser / finger pokes REVEAL safe nodes.', 60, 86);
+                    ctx.fillText('  Triggers laser / finger pokes REVEAL safe nodes.', 60, 92);
 
-                    ctx.font = 'bold 18px monospace';
+                    ctx.font = 'bold 19px monospace';
                     ctx.fillStyle = '#ff4466';
-                    ctx.fillText('• LEFT CONTROLLER / HAND (RED):', 40, 114);
-                    ctx.font = '14px monospace';
+                    ctx.fillText('• LEFT CONTROLLER / HAND (RED):', 40, 122);
+                    ctx.font = '15px monospace';
                     ctx.fillStyle = '#ffffff';
-                    ctx.fillText('  Triggers laser / finger pokes FLAG dangerous mine nodes.', 60, 134);
+                    ctx.fillText('  Triggers laser / finger pokes FLAG dangerous mine nodes.', 60, 144);
 
-                    ctx.font = '14px monospace';
+                    ctx.font = '15px monospace';
                     ctx.fillStyle = '#88ffaa';
-                    ctx.fillText('• LEFT THUMBSTICK: Move / strafe in the direction left controller points.', 40, 168);
-                    ctx.fillText('• RIGHT THUMBSTICK: Rotate the entire 3D matrix in place.', 40, 194);
-                    ctx.fillText('• SQUEEZE GRIP: Drag matrix in space. Release to float in weightless inertia!', 40, 220);
-                    ctx.fillText('• GRIP CLICK (BRAKE): Click Grip again at any time to instantly freeze matrix.', 40, 246);
-                    ctx.fillText('• FLIP LEFT PALM UP: Summons the wrist button to recall this menu.', 40, 272);
+                    ctx.fillText('• THUMBSTICKS: Rotate the entire 3D matrix in place.', 40, 180);
+                    ctx.fillText('• SQUEEZE GRIP: Drag matrix in space. Release to float in weightless inertia!', 40, 208);
+                    ctx.fillText('• GRIP CLICK (BRAKE): Click Grip again at any time to instantly freeze matrix.', 40, 236);
+                    ctx.fillText('• FLIP LEFT PALM UP: Summons the wrist button to recall this menu.', 40, 264);
 
-                    this.registerVJButton('close-page', 40, 298, 944, 78, 'RETURN TO SYSTEM', true);
+                    this.registerVJButton('close-page', 40, 295, 944, 80, 'RETURN TO SYSTEM', true);
                 } else if (this.vrUIPage === 'gameover') {
                     ctx.fillStyle = this.endGameData.color;
                     ctx.font = 'bold 36px monospace';
@@ -1300,6 +1299,7 @@
                 this.graphGroup.rotation.set(0, 0, 0);
 
                 this.linearVelocity.set(0, 0, 0);
+                this.angularVelocity.set(0, 0, 0);
                 this.isDrifting = false;
 
                 const box = new THREE.Box3();
@@ -1669,6 +1669,7 @@
             onXRGripStart(controller) {
                 // Instantly brake and freeze any ongoing zero-G inertia drift
                 this.linearVelocity.set(0, 0, 0);
+                this.angularVelocity.set(0, 0, 0);
                 this.isDrifting = false;
 
                 if (!this.grabbedBy.includes(controller)) {
@@ -1681,11 +1682,12 @@
                 this.grabbedBy = this.grabbedBy.filter(c => c !== controller);
                 
                 if (this.grabbedBy.length === 0) {
-                    // Activate weightless linear inertia if user was moving or flicking
-                    if (this.linearVelocity.length() > 0.02) {
+                    // Activate weightless inertia if user was moving or flicking
+                    if (this.linearVelocity.length() > 0.02 || this.angularVelocity.length() > 0.04) {
                         this.isDrifting = true;
                     } else {
                         this.linearVelocity.set(0, 0, 0);
+                        this.angularVelocity.set(0, 0, 0);
                         this.isDrifting = false;
                     }
                 } else {
@@ -1771,64 +1773,32 @@
                 this.updatePalmMenuState();
 
                 /* -------------------------------------------------------------
-                   1. Thumbstick Controls: Left = Locomotion, Right = Rotation
+                   1. Thumbstick Matrix Rotation
                 ------------------------------------------------------------- */
-                let moveX = 0, moveY = 0;
-                let leftController = null;
-                let rotX = 0, rotY = 0;
+                let thumbX = 0;
+                let thumbY = 0;
 
                 for (let controller of this.controllers) {
-                    const handedness = controller.userData?.handedness;
                     const gamepad = controller.userData?.gamepad;
-                    if (!gamepad || !gamepad.axes) continue;
-
-                    let sx = 0, sy = 0;
-                    if (gamepad.axes.length >= 4) {
-                        sx = gamepad.axes[2];
-                        sy = gamepad.axes[3];
-                    } else if (gamepad.axes.length >= 2) {
-                        sx = gamepad.axes[0];
-                        sy = gamepad.axes[1];
-                    }
-
-                    const deadzone = 0.15;
-                    sx = Math.abs(sx) > deadzone ? sx : 0;
-                    sy = Math.abs(sy) > deadzone ? sy : 0;
-
-                    if (handedness === 'left') {
-                        moveX = sx;
-                        moveY = sy;
-                        leftController = controller;
-                    } else if (handedness === 'right') {
-                        rotX = sx;
-                        rotY = sy;
+                    if (gamepad && gamepad.axes) {
+                        let sx = 0, sy = 0;
+                        if (gamepad.axes.length >= 4) {
+                            sx = gamepad.axes[2];
+                            sy = gamepad.axes[3];
+                        } else if (gamepad.axes.length >= 2) {
+                            sx = gamepad.axes[0];
+                            sy = gamepad.axes[1];
+                        }
+                        const deadzone = 0.15;
+                        if (Math.abs(sx) > deadzone) thumbX += sx;
+                        if (Math.abs(sy) > deadzone) thumbY += sy;
                     }
                 }
 
-                // Left Thumbstick: Move player forward/back & strafe left/right based on left controller orientation
-                if (leftController && (Math.abs(moveX) > 0 || Math.abs(moveY) > 0)) {
-                    const ctrlQuat = leftController.getWorldQuaternion(new THREE.Quaternion());
-                    
-                    // In Three.js controller space: (0, 0, -1) is forward, (1, 0, 0) is right
-                    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(ctrlQuat);
-                    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(ctrlQuat);
-
-                    // sy < 0 is pushed forward on standard gamepads
-                    const moveVector = new THREE.Vector3()
-                        .addScaledVector(fwd, -moveY)
-                        .addScaledVector(right, moveX);
-
-                    const walkSpeed = 1.8; // meters per second
-                    // Moving the player forward is equivalent to translating the worldAnchor backward
-                    this.worldAnchor.position.subScaledVector(moveVector, walkSpeed * dt);
-                    this.needsSpriteUpdate = true;
-                }
-
-                // Right Thumbstick: Rotate Matrix in place
-                if (Math.abs(rotX) > 0 || Math.abs(rotY) > 0) {
+                if (Math.abs(thumbX) > 0.05 || Math.abs(thumbY) > 0.05) {
                     const rotSpeed = 2.2;
-                    const yawAngle = -rotX * rotSpeed * dt;
-                    const pitchAngle = -rotY * rotSpeed * dt;
+                    const yawAngle = -thumbX * rotSpeed * dt;
+                    const pitchAngle = -thumbY * rotSpeed * dt;
 
                     // Yaw around World Y
                     const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
@@ -1842,6 +1812,9 @@
                     const qTotal = new THREE.Quaternion().multiplyQuaternions(qPitch, qYaw);
                     this.worldAnchor.quaternion.premultiply(qTotal);
                     this.needsSpriteUpdate = true;
+
+                    // Thumbstick activity dampens angular drift
+                    this.angularVelocity.multiplyScalar(0.7);
                 }
 
                 const currentlyHoveredNodeIds = new Set();
@@ -1981,33 +1954,59 @@
                 }
 
                 /* -------------------------------------------------------------
-                   4. Grip Movement & Linear-Only Zero-G Inertia
+                   4. Grip Movement & Zero-G Inertia
                 ------------------------------------------------------------- */
                 if (this.grabbedBy.length === 1) {
                     const c = this.grabbedBy[0];
-                    // Natural 1:1 movement & rotation while holding the grid
                     const delta = new THREE.Matrix4().copy(c.matrixWorld).multiply(this.previousControllerMatrix.invert());
                     this.worldAnchor.applyMatrix4(delta);
 
-                    // Track ONLY linear velocity for throwing (angular spin drift eliminated)
+                    // Compute instantaneous linear velocity
                     const deltaTrans = new THREE.Vector3().setFromMatrixPosition(delta);
                     const instLinVel = deltaTrans.divideScalar(Math.max(dt, 0.001));
 
+                    // Compute instantaneous angular velocity (axis * angle / dt)
+                    const deltaRot = new THREE.Quaternion().setFromRotationMatrix(delta);
+                    let angle = 2 * Math.acos(Math.min(1, Math.max(-1, deltaRot.w)));
+                    let axis = new THREE.Vector3(deltaRot.x, deltaRot.y, deltaRot.z);
+                    if (axis.lengthSq() > 0.0001) {
+                        axis.normalize();
+                    } else {
+                        axis.set(0, 1, 0);
+                        angle = 0;
+                    }
+                    const instAngVel = axis.multiplyScalar(angle / Math.max(dt, 0.001));
+
+                    // Exponential moving average for smooth, weightless release
                     const smoothFactor = 0.42;
                     this.linearVelocity.lerp(instLinVel, smoothFactor);
+                    this.angularVelocity.lerp(instAngVel, smoothFactor);
 
                     this.previousControllerMatrix.copy(c.matrixWorld);
                     this.needsSpriteUpdate = true;
                 } else if (this.isDrifting && this.grabbedBy.length === 0) {
-                    // Weightless linear glide with drag (no angular spin)
+                    // Weightless glide with slight cosmic drag
                     const drag = 0.992;
                     this.linearVelocity.multiplyScalar(drag);
+                    this.angularVelocity.multiplyScalar(drag);
+
+                    // Apply linear glide
                     this.worldAnchor.position.addScaledVector(this.linearVelocity, dt);
+
+                    // Apply angular spin
+                    const angSpeed = this.angularVelocity.length();
+                    if (angSpeed > 0.0001) {
+                        const rotAxis = this.angularVelocity.clone().normalize();
+                        const qStep = new THREE.Quaternion().setFromAxisAngle(rotAxis, angSpeed * dt);
+                        this.worldAnchor.quaternion.premultiply(qStep);
+                    }
+
                     this.needsSpriteUpdate = true;
 
-                    // Stop drift when speed becomes imperceptible
-                    if (this.linearVelocity.length() < 0.004) {
+                    // Stop when drift speed becomes imperceptible
+                    if (this.linearVelocity.length() < 0.004 && this.angularVelocity.length() < 0.008) {
                         this.linearVelocity.set(0, 0, 0);
+                        this.angularVelocity.set(0, 0, 0);
                         this.isDrifting = false;
                     }
                 }
