@@ -37,7 +37,6 @@
             z-index: 1;
         }
 
-        /* 2D HUD & Overlay UI */
         .ui-layer {
             position: absolute;
             z-index: 10;
@@ -131,7 +130,6 @@
             letter-spacing: 0px;
         }
 
-        /* Modals */
         .modal {
             position: absolute;
             top: 50%;
@@ -250,7 +248,7 @@
         </footer>
     </div>
 
-    <!-- 2D Generation Selection Modal -->
+    <!-- 2D Modals -->
     <div id="modal-gen" class="modal interactive">
         <h2>GENERATION ALGORITHM</h2>
         <div class="gen-options">
@@ -276,7 +274,6 @@
         </div>
     </div>
 
-    <!-- 2D Difficulty Selection Modal -->
     <div id="modal-difficulty" class="modal interactive">
         <h2>SELECT DIFFICULTY</h2>
         <div class="diff-grid">
@@ -291,7 +288,6 @@
         </div>
     </div>
 
-    <!-- 2D Tutorial Modal -->
     <div id="modal-tutorial" class="modal interactive">
         <h2>3D MINESWEEPER RULES</h2>
         <p>• Nodes form a 3D web connected via cybernetic data links.<br>
@@ -300,14 +296,13 @@
            • <b>Yellow Nodes:</b> Clue nodes showing unrevealed neighboring mine counts.<br>
            • <b>Desktop:</b> Left Click = Reveal, Right Click = Flag, Drag = Orbit.<br>
            • <b>VR:</b> Index Trigger = Reveal/Flag, Squeeze Grip = Move & Rotate Field.<br>
-           • <b>Wrist Menu:</b> Flip your left palm upward anytime to summon the floating dashboard!
+           • <b>Wrist Menu:</b> Flip your left palm upward anytime to summon the dashboard!
         </p>
         <div class="modal-buttons">
             <button class="btn modal-close">Understood</button>
         </div>
     </div>
 
-    <!-- 2D Game Over / Victory Modal -->
     <div id="modal-gameover" class="modal interactive">
         <h2 id="endgame-title" style="color: #ff3333;">MISSION FAILED</h2>
         <p id="endgame-msg" style="text-align: center;">You triggered a volatile core!</p>
@@ -387,7 +382,7 @@
         const sfx = new SoundFX();
 
         /* -------------------------------------------------------------
-           2. Visual Constants & Real-World Dimensions (Meters)
+           2. Visual Constants
         ------------------------------------------------------------- */
         const COLORS = {
             NODE_UNREVEALED: 0x555555,
@@ -400,8 +395,8 @@
             LINK_MINE: 0xff1111
         };
 
-        const NODE_RADIUS = 0.045; // 4.5 cm radius
-        const LINK_RADIUS = 0.006; // 6 mm link radius
+        const NODE_RADIUS = 0.045;
+        const LINK_RADIUS = 0.006;
 
         const TEXTURE_CACHE = new Map();
         const MATERIAL_CACHE = new Map();
@@ -467,18 +462,14 @@
                 this.hoveredVRButton = null;
                 this.hoveredPalmButton = false;
 
-                // Menu visibility & state
                 this.isSpatialMenuOpen = true;
 
-                // Throttled & Reactive Sprite Billboarding
                 this.spriteUpdateTimer = 0;
                 this.needsSpriteUpdate = false;
 
-                // 4 Generation algorithms & 5 Difficulty Presets
                 this.genAlgorithm = 'tree';
                 this.currentDiff = 'easy';
 
-                // Uniform base metrics locked to Easy to preserve open spacing across all difficulties
                 const BASE_TREE_LINK    = 0.48;
                 const BASE_TREE_MIN_D   = 0.36;
                 const BASE_TREE_MAX_SEC = 0.69;
@@ -512,13 +503,11 @@
                     }
                 };
 
-                // VR State
                 this.grabbedBy = [];
                 this.previousControllerMatrix = new THREE.Matrix4();
                 this.vrUIPage = 'hud';
                 this.endGameData = { title: 'MISSION FAILED', message: 'Core detonated.', color: '#ff2222' };
 
-                // Pre-allocated GC Math objects
                 this.camPos = new THREE.Vector3();
                 this.localDir = new THREE.Vector3();
                 this.tempVec = new THREE.Vector3();
@@ -526,7 +515,6 @@
                 this.workingMatrix = new THREE.Matrix4();
                 this.sharedSphereGeo = new THREE.SphereGeometry(NODE_RADIUS, 18, 18);
 
-                // Palm orientation math
                 this.palmP1 = new THREE.Vector3();
                 this.palmP2 = new THREE.Vector3();
                 this.palmP3 = new THREE.Vector3();
@@ -629,7 +617,7 @@
             }
 
             /* -------------------------------------------------------------
-               4. Interactive 3D Spatial Terminal & Palm Wrist Menu
+               4. Spatial HUD: Always On-Top & Billboarded
             ------------------------------------------------------------- */
             initSpatialPanel() {
                 this.hudCanvas = document.createElement('canvas');
@@ -641,12 +629,20 @@
                 this.hudTexture.minFilter = THREE.LinearFilter;
                 this.hudTexture.generateMipmaps = false;
 
-                const hudGeo = new THREE.PlaneGeometry(0.85, 0.35);
-                const hudMat = new THREE.MeshBasicMaterial({ map: this.hudTexture, transparent: true, side: THREE.DoubleSide });
+                const hudGeo = new THREE.PlaneGeometry(0.70, 0.287);
+                // depthTest: false + high renderOrder guarantees it renders on top of nodes
+                const hudMat = new THREE.MeshBasicMaterial({ 
+                    map: this.hudTexture, 
+                    transparent: true, 
+                    side: THREE.DoubleSide,
+                    depthTest: false,
+                    depthWrite: false
+                });
 
                 this.hudMesh = new THREE.Mesh(hudGeo, hudMat);
-                this.hudMesh.position.set(0, 1.15, 0);
-                this.worldAnchor.add(this.hudMesh);
+                this.hudMesh.renderOrder = 9999;
+                // Add to scene root directly so it's not affected by worldAnchor rotations
+                this.scene.add(this.hudMesh);
 
                 this.virtualButtons = [];
                 this.renderSpatialUI();
@@ -669,12 +665,13 @@
                     map: this.palmTexture,
                     transparent: true,
                     side: THREE.DoubleSide,
-                    depthTest: false
+                    depthTest: false,
+                    depthWrite: false
                 });
 
                 this.palmButtonMesh = new THREE.Mesh(palmGeo, palmMat);
                 this.palmButtonMesh.visible = false;
-                this.palmButtonMesh.renderOrder = 999;
+                this.palmButtonMesh.renderOrder = 9999;
                 this.scene.add(this.palmButtonMesh);
             }
 
@@ -753,7 +750,6 @@
 
                 this.virtualButtons = [];
 
-                // Close [X] Button in top right corner
                 this.registerVJButton('close-hud-window', 958, 14, 52, 44, '✕');
 
                 const curMines = this.difficulties[this.currentDiff].mines;
@@ -836,11 +832,39 @@
                 this.hudTexture.needsUpdate = true;
             }
 
+            updateSpatialHUDPosition() {
+                if (!this.isSpatialMenuOpen || !this.hudMesh.visible) return;
+
+                const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
+                const camPos = new THREE.Vector3();
+                const camDir = new THREE.Vector3();
+
+                cam.getWorldPosition(camPos);
+                cam.getWorldDirection(camDir);
+
+                // Position straight in front of camera at 0.85m distance
+                const targetPos = camPos.clone().addScaledVector(camDir, 0.85);
+
+                // Smoothly lerp towards camera forward position
+                this.hudMesh.position.lerp(targetPos, 0.12);
+                this.hudMesh.quaternion.copy(cam.quaternion);
+            }
+
             openSpatialMenu() {
                 sfx.click();
                 this.isSpatialMenuOpen = true;
                 this.hudMesh.visible = true;
                 if (this.palmButtonMesh) this.palmButtonMesh.visible = false;
+                
+                // Immediately snap to front of camera upon opening
+                const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
+                const camPos = new THREE.Vector3();
+                const camDir = new THREE.Vector3();
+                cam.getWorldPosition(camPos);
+                cam.getWorldDirection(camDir);
+                this.hudMesh.position.copy(camPos).addScaledVector(camDir, 0.85);
+                this.hudMesh.quaternion.copy(cam.quaternion);
+
                 this.renderSpatialUI();
                 this.update2DHUD();
             }
@@ -892,7 +916,7 @@
             }
 
             /* -------------------------------------------------------------
-               5. Breadth-First Connectivity & 4 Generation Algorithms
+               5. Graph Building & Automatic Outside Framing
             ------------------------------------------------------------- */
             clearGraph() {
                 while (this.graphGroup.children.length > 0) {
@@ -1144,12 +1168,46 @@
                 this.ensureCompleteConnectivity();
             }
 
+            frameGridInView() {
+                if (this.nodes.length === 0) return;
+
+                // Reset world transform matrices
+                this.worldAnchor.position.set(0, 1.25, -0.9);
+                this.worldAnchor.rotation.set(0, 0, 0);
+                this.worldAnchor.scale.set(1, 1, 1);
+                this.graphGroup.rotation.set(0, 0, 0);
+
+                // Compute bounding sphere of graph
+                const box = new THREE.Box3();
+                this.nodes.forEach(n => box.expandByPoint(n.pos));
+                const sphere = new THREE.Sphere();
+                box.getBoundingSphere(sphere);
+
+                const radius = Math.max(0.6, sphere.radius);
+                const fov = (this.camera.fov * Math.PI) / 180;
+                // Calculate necessary distance to fit the full sphere in camera FOV
+                const fitDistance = (radius / Math.sin(fov / 2)) * 1.15;
+
+                // Desktop Orbit Camera Framing
+                this.camera.position.set(0, 1.35, fitDistance + 0.3);
+                if (this.controls) {
+                    this.controls.target.set(0, 1.25, 0);
+                    this.controls.update();
+                }
+
+                // In VR, push the world anchor forward so the entire grid sits clearly in front
+                if (this.renderer.xr.isPresenting) {
+                    this.worldAnchor.position.set(0, 1.25, -(fitDistance * 0.85));
+                }
+            }
+
             buildGraph() {
                 if (this.genAlgorithm === 'tree') {
                     this.generateTreeGraph();
                 } else {
                     this.generatePoissonGraph(this.genAlgorithm);
                 }
+                this.frameGridInView();
             }
 
             addNode(pos) {
@@ -1457,7 +1515,7 @@
             }
 
             /* -------------------------------------------------------------
-               7. Interaction: WebXR (Hands/Controllers) + Desktop
+               7. Interaction: WebXR + Desktop
             ------------------------------------------------------------- */
             triggerHaptic(controller, intensity = 0.5, duration = 30) {
                 const gamepad = controller.userData?.gamepad;
@@ -1504,7 +1562,6 @@
 
                 const UPWARD_THRESHOLD = 0.68;
 
-                // 1. Hand Tracking Mode: check left hand joints
                 for (let hand of this.hands) {
                     if (hand.userData?.handedness === 'left' && hand.joints) {
                         const wrist = hand.joints['wrist'];
@@ -1535,7 +1592,6 @@
                     }
                 }
 
-                // 2. Controller Mode: ONLY execute if left hand optical tracking is NOT active
                 if (!isLeftHandTracked && !leftPalmUp) {
                     for (let controller of this.controllers) {
                         if (controller.userData?.handedness === 'left' && controller.userData?.gamepad) {
@@ -1554,7 +1610,6 @@
                     }
                 }
 
-                // Show or hide palm button badge
                 if (leftPalmUp && palmTargetPos) {
                     this.palmButtonMesh.visible = true;
                     this.palmButtonMesh.position.copy(palmTargetPos);
@@ -1583,7 +1638,7 @@
 
                     const laser = controller.getObjectByName('laser');
 
-                    // Check Palm Menu Button Raycast
+                    // Check Palm Button
                     if (this.palmButtonMesh.visible) {
                         const palmHits = this.raycaster.intersectObject(this.palmButtonMesh, false);
                         if (palmHits.length > 0) {
@@ -1630,13 +1685,11 @@
                         if (indexTip) {
                             const tipPos = this.tempVec.setFromMatrixPosition(indexTip.matrixWorld);
 
-                            // Poke palm button to open menu
                             if (this.palmButtonMesh.visible && tipPos.distanceTo(this.palmButtonMesh.position) < 0.05) {
                                 this.openSpatialMenu();
                                 return;
                             }
 
-                            // Poke node directly
                             for (let n of this.nodes) {
                                 const nWorld = n.mesh.getWorldPosition(this.tempNodePos);
                                 if (tipPos.distanceTo(nWorld) < NODE_RADIUS * 1.3) {
@@ -1650,7 +1703,6 @@
                     }
                 }
 
-                // Hover visual updates
                 if (this.hoveredPalmButton !== foundHoverPalm) {
                     this.hoveredPalmButton = foundHoverPalm;
                     this.renderPalmButtonTexture(this.hoveredPalmButton);
@@ -1667,7 +1719,7 @@
 
                 this.hoveredVRButton = foundHoverBtn;
 
-                // 6DoF Field Manipulation: update sprites continuously during movement/rotation
+                // 6DoF matrix grabbing
                 if (this.grabbedBy.length === 1) {
                     const c = this.grabbedBy[0];
                     const delta = new THREE.Matrix4().copy(c.matrixWorld).multiply(this.previousControllerMatrix.invert());
@@ -1679,10 +1731,9 @@
 
             initDesktopInteraction() {
                 this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-                this.controls.target.set(0, 1.25, -0.9);
+                this.controls.target.set(0, 1.25, 0);
                 this.controls.enableDamping = true;
 
-                // Trigger sprite updates whenever OrbitControls camera transforms change
                 this.controls.addEventListener('change', () => {
                     this.needsSpriteUpdate = true;
                 });
@@ -1700,7 +1751,7 @@
                     mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
                     dRay.setFromCamera(mouse, this.camera);
 
-                    // Check Palm Button Click
+                    // Check Palm Button
                     if (this.palmButtonMesh.visible) {
                         const pHits = dRay.intersectObject(this.palmButtonMesh, false);
                         if (pHits.length > 0) {
@@ -1827,10 +1878,13 @@
             }
 
             /* -------------------------------------------------------------
-               9. Animation & Render Loop
+               9. Main Loop
             ------------------------------------------------------------- */
             render(time) {
                 const dt = 0.016;
+
+                // Keep the Spatial HUD billboarded straight ahead of your face
+                this.updateSpatialHUDPosition();
 
                 if (this.renderer.xr.isPresenting) {
                     this.handleVRInteractions();
@@ -1856,7 +1910,7 @@
         }
 
         /* -------------------------------------------------------------
-           Bootstrap Application
+           Bootstrap
         ------------------------------------------------------------- */
         window.addEventListener('DOMContentLoaded', () => {
             const app = new MinesweeperApp();
