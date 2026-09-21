@@ -1804,7 +1804,8 @@
                     this.palmButtonMesh.visible = true;
                     this.palmButtonMesh.position.copy(palmTargetPos);
                     const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
-                    this.palmButtonMesh.lookAt(cam.position);
+                    cam.getWorldPosition(this.camPos);
+                    this.palmButtonMesh.lookAt(this.camPos);
                 } else {
                     this.palmButtonMesh.visible = false;
                 }
@@ -1844,7 +1845,6 @@
                                 moveY = sy;
                             } else if (handedness === 'right') {
                                 rotX = sx;
-                                rotY = sy;
                             }
                         }
                     }
