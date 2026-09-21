@@ -238,7 +238,7 @@
 
         <footer>
             <div class="hud-box interactive vr-tip">
-                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Thumbstick = Rotate Grid | Grip = Pull Grid (Release for linear drift, click Grip again to brake)
+                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Left Stick = Move / Strafe | Right Stick = Rotate Grid | Grip = Pull Grid (Release to glide, click Grip again to brake)
             </div>
             <div class="hud-box interactive" style="display:flex; gap: 10px;">
                 <button class="btn active" id="btn-mode-reveal">⛏️ Click: Reveal</button>
@@ -296,7 +296,8 @@
            • <b>Yellow Nodes:</b> Clue nodes showing unrevealed neighboring mine counts.<br>
            • <b style="color:#00d0ff;">🔵 RIGHT HAND (BLUE):</b> Open/Reveal nodes (Trigger or poke).<br>
            • <b style="color:#ff4466;">🔴 LEFT HAND (RED):</b> Flag/Mark mines (Trigger or poke).<br>
-           • <b>VR Thumbstick:</b> Rotate the whole matrix in place freely.<br>
+           • <b>Left Thumbstick:</b> Move forward, backward, and strafe side-to-side.<br>
+           • <b>Right Thumbstick:</b> Rotate the whole matrix in place freely.<br>
            • <b>VR Grip Glide:</b> Pull and toss the field with Grip. Release it to float in weightless linear inertia. <b>Click Grip again anytime to brake & stop!</b><br>
            • <b>Wrist Menu:</b> Flip your left palm upward anytime to summon the dashboard!
         </p>
@@ -528,6 +529,11 @@
                 this.palmWorldPos = new THREE.Vector3();
                 this.controllerPalmDir = new THREE.Vector3();
 
+                // Locomotion scratch vectors
+                this.camForward = new THREE.Vector3();
+                this.camRight = new THREE.Vector3();
+                this.moveVector = new THREE.Vector3();
+
                 this.initGraphics();
                 this.initWebXR();
                 this.initSpatialPanel();
@@ -542,8 +548,13 @@
                 this.scene = new THREE.Scene();
                 this.scene.background = new THREE.Color(0x020603);
 
+                // Camera Rig for smooth WebXR locomotion
+                this.cameraRig = new THREE.Group();
+                this.scene.add(this.cameraRig);
+
                 this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 120);
                 this.camera.position.set(0, 1.45, 2.2);
+                this.cameraRig.add(this.camera);
 
                 this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
                 this.renderer.setSize(window.innerWidth, window.innerHeight);
@@ -581,7 +592,7 @@
 
                 for (let i = 0; i < 2; i++) {
                     const controller = this.renderer.xr.getController(i);
-                    this.scene.add(controller);
+                    this.cameraRig.add(controller);
 
                     controller.userData.hoveredNode = null;
                     controller.userData.hoveredVRButton = null;
@@ -620,12 +631,12 @@
                     const grip = this.renderer.xr.getControllerGrip(i);
                     const cModel = this.controllerModelFactory.createControllerModel(grip);
                     grip.add(cModel);
-                    this.scene.add(grip);
+                    this.cameraRig.add(grip);
                     this.controllerGrips.push(grip);
 
                     const hand = this.renderer.xr.getHand(i);
                     hand.add(this.handModelFactory.createHandModel(hand, 'mesh'));
-                    this.scene.add(hand);
+                    this.cameraRig.add(hand);
 
                     controller.addEventListener('connected', (e) => {
                         controller.userData.gamepad = e.data.gamepad;
@@ -904,12 +915,13 @@
 
                     ctx.font = '15px monospace';
                     ctx.fillStyle = '#88ffaa';
-                    ctx.fillText('• THUMBSTICKS: Rotate the entire 3D matrix in place.', 40, 180);
-                    ctx.fillText('• SQUEEZE GRIP: Drag matrix in space. Release to glide along weightless linear path!', 40, 208);
-                    ctx.fillText('• GRIP CLICK (BRAKE): Click Grip again at any time to instantly freeze matrix.', 40, 236);
-                    ctx.fillText('• FLIP LEFT PALM UP: Summons the wrist button to recall this menu.', 40, 264);
+                    ctx.fillText('• LEFT THUMBSTICK: Move forward/back and strafe side-to-side.', 40, 180);
+                    ctx.fillText('• RIGHT THUMBSTICK: Rotate the entire 3D matrix in place.', 40, 208);
+                    ctx.fillText('• SQUEEZE GRIP: Drag matrix in space. Release to glide along weightless linear path!', 40, 236);
+                    ctx.fillText('• GRIP CLICK (BRAKE): Click Grip again at any time to instantly freeze matrix.', 40, 264);
+                    ctx.fillText('• FLIP LEFT PALM UP: Summons the wrist button to recall this menu.', 40, 292);
 
-                    this.registerVJButton('close-page', 40, 295, 944, 80, 'RETURN TO SYSTEM', true);
+                    this.registerVJButton('close-page', 40, 320, 944, 65, 'RETURN TO SYSTEM', true);
                 } else if (this.vrUIPage === 'gameover') {
                     ctx.fillStyle = this.endGameData.color;
                     ctx.font = 'bold 36px monospace';
@@ -1310,6 +1322,9 @@
 
                 this.linearVelocity.set(0, 0, 0);
                 this.isDrifting = false;
+
+                // Reset camera rig position for clean origin
+                this.cameraRig.position.set(0, 0, 0);
 
                 const box = new THREE.Box3();
                 this.nodes.forEach(n => box.expandByPoint(n.pos));
@@ -1780,13 +1795,16 @@
                 this.updatePalmMenuState();
 
                 /* -------------------------------------------------------------
-                   1. Thumbstick Matrix Rotation
+                   1. Dual-Thumbstick Controls:
+                      - Left Stick: First-Person Locomotion (Forward/Back & Strafe)
+                      - Right Stick: Rotate Grid Matrix in Place
                 ------------------------------------------------------------- */
-                let thumbX = 0;
-                let thumbY = 0;
+                let moveX = 0, moveY = 0;
+                let rotX = 0, rotY = 0;
 
                 for (let controller of this.controllers) {
                     const gamepad = controller.userData?.gamepad;
+                    const handedness = controller.userData?.handedness;
                     if (gamepad && gamepad.axes) {
                         let sx = 0, sy = 0;
                         if (gamepad.axes.length >= 4) {
@@ -1797,24 +1815,48 @@
                             sy = gamepad.axes[1];
                         }
                         const deadzone = 0.15;
-                        if (Math.abs(sx) > deadzone) thumbX += sx;
-                        if (Math.abs(sy) > deadzone) thumbY += sy;
+                        if (Math.abs(sx) > deadzone || Math.abs(sy) > deadzone) {
+                            if (handedness === 'left') {
+                                moveX = sx;
+                                moveY = sy;
+                            } else if (handedness === 'right') {
+                                rotX = sx;
+                                rotY = sy;
+                            }
+                        }
                     }
                 }
 
-                if (Math.abs(thumbX) > 0.05 || Math.abs(thumbY) > 0.05) {
+                // Left Stick Smooth Locomotion
+                if (Math.abs(moveX) > 0.05 || Math.abs(moveY) > 0.05) {
+                    cam.getWorldDirection(this.camForward);
+                    this.camForward.y = 0;
+                    this.camForward.normalize();
+
+                    this.camRight.crossVectors(this.camForward, new THREE.Vector3(0, 1, 0)).normalize();
+
+                    this.moveVector.set(0, 0, 0);
+                    this.moveVector.addScaledVector(this.camForward, -moveY);
+                    this.moveVector.addScaledVector(this.camRight, moveX);
+
+                    const moveSpeed = 2.2; // meters/second
+                    this.cameraRig.position.addScaledVector(this.moveVector, moveSpeed * dt);
+                }
+
+                // Right Stick Matrix Rotation
+                if (Math.abs(rotX) > 0.05 || Math.abs(rotY) > 0.05) {
                     const rotSpeed = 2.2;
-                    const yawAngle = -thumbX * rotSpeed * dt;
-                    const pitchAngle = -thumbY * rotSpeed * dt;
+                    const yawAngle = -rotX * rotSpeed * dt;
+                    const pitchAngle = -rotY * rotSpeed * dt;
 
                     // Yaw around World Y
                     const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
 
                     // Pitch around Camera's View Right vector
-                    const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-                    camRight.y = 0;
-                    camRight.normalize();
-                    const qPitch = new THREE.Quaternion().setFromAxisAngle(camRight, pitchAngle);
+                    const camRightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+                    camRightVec.y = 0;
+                    camRightVec.normalize();
+                    const qPitch = new THREE.Quaternion().setFromAxisAngle(camRightVec, pitchAngle);
 
                     const qTotal = new THREE.Quaternion().multiplyQuaternions(qPitch, qYaw);
                     this.worldAnchor.quaternion.premultiply(qTotal);
