@@ -518,6 +518,7 @@
                 this.camPos = new THREE.Vector3();
                 this.localDir = new THREE.Vector3();
                 this.tempVec = new THREE.Vector3();
+                this.tempQuat = new THREE.Quaternion();
                 this.tempNodePos = new THREE.Vector3();
                 this.workingMatrix = new THREE.Matrix4();
                 this.sharedSphereGeo = new THREE.SphereGeometry(NODE_RADIUS, 18, 18);
@@ -714,7 +715,7 @@
             }
 
             /* -------------------------------------------------------------
-               4. Spatial HUD: Always On-Top & Billboarded
+               4. Spatial HUD: Always On-Top & Smoothly Locked to Player Rig
             ------------------------------------------------------------- */
             initSpatialPanel() {
                 this.hudCanvas = document.createElement('canvas');
@@ -737,7 +738,9 @@
 
                 this.hudMesh = new THREE.Mesh(hudGeo, hudMat);
                 this.hudMesh.renderOrder = 9999;
-                this.scene.add(this.hudMesh);
+                
+                // Parented directly to cameraRig so thumbstick/grip movement moves the HUD in lockstep
+                this.cameraRig.add(this.hudMesh);
 
                 this.virtualButtons = [];
                 this.renderSpatialUI();
@@ -940,20 +943,45 @@
                 this.hudTexture.needsUpdate = true;
             }
 
-            updateSpatialHUDPosition() {
-                if (!this.isSpatialMenuOpen || !this.hudMesh.visible) return;
+            getHeadPoseInRig(outPos, outQuat, outDir) {
+                if (this.renderer.xr && this.renderer.xr.isPresenting) {
+                    const xrCam = this.renderer.xr.getCamera();
+                    // xrCam.matrix stores the head's local tracking pose relative to cameraRig
+                    xrCam.matrix.decompose(outPos, outQuat, this.tempVec);
+                    if (outDir) {
+                        outDir.set(0, 0, -1).applyQuaternion(outQuat);
+                    }
+                } else {
+                    outPos.copy(this.camera.position);
+                    outQuat.copy(this.camera.quaternion);
+                    if (outDir) {
+                        outDir.set(0, 0, -1).applyQuaternion(outQuat);
+                    }
+                }
+            }
 
-                const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
-                const camPos = new THREE.Vector3();
-                const camDir = new THREE.Vector3();
+            updateSpatialHUDPosition(snap = false) {
+                if (!this.isSpatialMenuOpen || !this.hudMesh || !this.hudMesh.visible) return;
 
-                cam.getWorldPosition(camPos);
-                cam.getWorldDirection(camDir);
+                const headPos = new THREE.Vector3();
+                const headQuat = new THREE.Quaternion();
+                const headDir = new THREE.Vector3();
 
-                const targetPos = camPos.clone().addScaledVector(camDir, 0.85);
+                this.getHeadPoseInRig(headPos, headQuat, headDir);
 
-                this.hudMesh.position.lerp(targetPos, 0.12);
-                this.hudMesh.quaternion.copy(cam.quaternion);
+                // Position the dashboard 0.85m in front of the player's view in cameraRig space
+                const targetPos = headPos.clone().addScaledVector(headDir, 0.85);
+
+                if (snap) {
+                    this.hudMesh.position.copy(targetPos);
+                    this.hudMesh.quaternion.copy(headQuat);
+                    return;
+                }
+
+                // As hudMesh is a child of cameraRig, thumbstick and grip locomotion move it instantly.
+                // This smooth slerp/lerp recenters it gracefully when you look around.
+                this.hudMesh.position.lerp(targetPos, 0.14);
+                this.hudMesh.quaternion.slerp(headQuat, 0.14);
             }
 
             updateControllerVisualHierarchy() {
@@ -991,13 +1019,8 @@
                 this.hudMesh.visible = true;
                 if (this.palmButtonMesh) this.palmButtonMesh.visible = false;
                 
-                const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
-                const camPos = new THREE.Vector3();
-                const camDir = new THREE.Vector3();
-                cam.getWorldPosition(camPos);
-                cam.getWorldDirection(camDir);
-                this.hudMesh.position.copy(camPos).addScaledVector(camDir, 0.85);
-                this.hudMesh.quaternion.copy(cam.quaternion);
+                // Snap directly in front of the user's current view
+                this.updateSpatialHUDPosition(true);
 
                 this.updateControllerVisualHierarchy();
                 this.renderSpatialUI();
@@ -1918,7 +1941,7 @@
                             if (reticle) {
                                 reticle.visible = true;
                                 reticle.position.copy(hit.point).addScaledVector(this.raycaster.ray.direction, -0.002);
-                                reticle.quaternion.copy(this.hudMesh.quaternion);
+                                reticle.quaternion.copy(this.hudMesh.getWorldQuaternion(new THREE.Quaternion()));
                             }
                             continue;
                         }
@@ -1997,40 +2020,35 @@
                 }
 
                 /* -------------------------------------------------------------
-		   4. Zero-G Grip Locomotion: Grab & Pull/Push YOURSELF
-		------------------------------------------------------------- */
-		if (this.grabbedBy.length === 1) {
-		    const c = this.grabbedBy[0];
-		    c.getWorldPosition(this.currentControllerWorldPos);
+                   4. Zero-G Grip Locomotion: Grab & Pull/Push YOURSELF
+                ------------------------------------------------------------- */
+                if (this.grabbedBy.length === 1) {
+                    const c = this.grabbedBy[0];
+                    c.getWorldPosition(this.currentControllerWorldPos);
 
-		    const playerDelta = new THREE.Vector3().subVectors(this.previousControllerPos, this.currentControllerWorldPos);
-		    this.cameraRig.position.add(playerDelta);
+                    const playerDelta = new THREE.Vector3().subVectors(this.previousControllerPos, this.currentControllerWorldPos);
+                    this.cameraRig.position.add(playerDelta);
 
-		    // 1. ADD SPEED MULTIPLIER HERE: (e.g. 1.8x - 2.5x launch speed boost)
-		    const SPEED_BOOST = 2.0; 
-		    const instPlayerVel = playerDelta.clone().divideScalar(Math.max(dt, 0.001)).multiplyScalar(SPEED_BOOST);
-    
-		    const smoothFactor = 0.55; // Slightly higher responsive tracking for fast flicks
-		    this.playerLinearVelocity.lerp(instPlayerVel, smoothFactor);
+                    const SPEED_BOOST = 2.0; 
+                    const instPlayerVel = playerDelta.clone().divideScalar(Math.max(dt, 0.001)).multiplyScalar(SPEED_BOOST);
+            
+                    const smoothFactor = 0.55;
+                    this.playerLinearVelocity.lerp(instPlayerVel, smoothFactor);
 
-		    this.previousControllerPos.copy(this.currentControllerWorldPos);
-		    this.needsSpriteUpdate = true;
-		} else if (this.isPlayerDrifting && this.grabbedBy.length === 0) {
-		    // 2. ADJUST DRAG (closer to 1.0 = less friction, stays faster longer)
-		    // 0.992 is default. 0.997 gives long, fast space drifts.
-		    const drag = 0.996; 
-		    this.playerLinearVelocity.multiplyScalar(drag);
+                    this.previousControllerPos.copy(this.currentControllerWorldPos);
+                    this.needsSpriteUpdate = true;
+                } else if (this.isPlayerDrifting && this.grabbedBy.length === 0) {
+                    const drag = 0.996; 
+                    this.playerLinearVelocity.multiplyScalar(drag);
 
-		    // Apply linear glide to camera rig
-		    this.cameraRig.position.addScaledVector(this.playerLinearVelocity, dt);
-		    this.needsSpriteUpdate = true;
+                    this.cameraRig.position.addScaledVector(this.playerLinearVelocity, dt);
+                    this.needsSpriteUpdate = true;
 
-		    // Stop drifting when speed becomes imperceptible
-		    if (this.playerLinearVelocity.length() < 0.004) {
-		        this.playerLinearVelocity.set(0, 0, 0);
-		        this.isPlayerDrifting = false;
-		    }
-		}
+                    if (this.playerLinearVelocity.length() < 0.004) {
+                        this.playerLinearVelocity.set(0, 0, 0);
+                        this.isPlayerDrifting = false;
+                    }
+                }
             }
 
             initDesktopInteraction() {
@@ -2183,8 +2201,6 @@
             render(time) {
                 const dt = 0.016;
 
-                this.updateSpatialHUDPosition();
-
                 if (this.renderer.xr.isPresenting) {
                     this.handleVRInteractions(dt);
                 } else {
@@ -2194,6 +2210,9 @@
                         this.needsSpriteUpdate = true;
                     }
                 }
+
+                // Process HUD update after locomotion so it moves synchronously without a 1-frame lag
+                this.updateSpatialHUDPosition();
 
                 this.spriteUpdateTimer += dt;
                 if (this.needsSpriteUpdate || this.spriteUpdateTimer >= 1.0) {
