@@ -1997,40 +1997,40 @@
                 }
 
                 /* -------------------------------------------------------------
-                   4. Zero-G Grip Locomotion: Grab & Pull/Push YOURSELF
-                ------------------------------------------------------------- */
-                if (this.grabbedBy.length === 1) {
-                    const c = this.grabbedBy[0];
-                    c.getWorldPosition(this.currentControllerWorldPos);
+		   4. Zero-G Grip Locomotion: Grab & Pull/Push YOURSELF
+		------------------------------------------------------------- */
+		if (this.grabbedBy.length === 1) {
+		    const c = this.grabbedBy[0];
+		    c.getWorldPosition(this.currentControllerWorldPos);
 
-                    // Pulling hand back moves player forward in world space:
-                    // deltaHand = currentPos - prevPos
-                    // deltaPlayer = -deltaHand = prevPos - currentPos
-                    const playerDelta = new THREE.Vector3().subVectors(this.previousControllerPos, this.currentControllerWorldPos);
-                    this.cameraRig.position.add(playerDelta);
+		    const playerDelta = new THREE.Vector3().subVectors(this.previousControllerPos, this.currentControllerWorldPos);
+		    this.cameraRig.position.add(playerDelta);
 
-                    // Compute player linear velocity for zero-g release glide
-                    const instPlayerVel = playerDelta.clone().divideScalar(Math.max(dt, 0.001));
-                    const smoothFactor = 0.42;
-                    this.playerLinearVelocity.lerp(instPlayerVel, smoothFactor);
+		    // 1. ADD SPEED MULTIPLIER HERE: (e.g. 1.8x - 2.5x launch speed boost)
+		    const SPEED_BOOST = 2.0; 
+		    const instPlayerVel = playerDelta.clone().divideScalar(Math.max(dt, 0.001)).multiplyScalar(SPEED_BOOST);
+    
+		    const smoothFactor = 0.55; // Slightly higher responsive tracking for fast flicks
+		    this.playerLinearVelocity.lerp(instPlayerVel, smoothFactor);
 
-                    this.previousControllerPos.copy(this.currentControllerWorldPos);
-                    this.needsSpriteUpdate = true;
-                } else if (this.isPlayerDrifting && this.grabbedBy.length === 0) {
-                    // Drift through zero-gravity space with cosmic drag
-                    const drag = 0.992;
-                    this.playerLinearVelocity.multiplyScalar(drag);
+		    this.previousControllerPos.copy(this.currentControllerWorldPos);
+		    this.needsSpriteUpdate = true;
+		} else if (this.isPlayerDrifting && this.grabbedBy.length === 0) {
+		    // 2. ADJUST DRAG (closer to 1.0 = less friction, stays faster longer)
+		    // 0.992 is default. 0.997 gives long, fast space drifts.
+		    const drag = 0.996; 
+		    this.playerLinearVelocity.multiplyScalar(drag);
 
-                    // Apply linear glide to camera rig
-                    this.cameraRig.position.addScaledVector(this.playerLinearVelocity, dt);
-                    this.needsSpriteUpdate = true;
+		    // Apply linear glide to camera rig
+		    this.cameraRig.position.addScaledVector(this.playerLinearVelocity, dt);
+		    this.needsSpriteUpdate = true;
 
-                    // Stop drifting when speed becomes imperceptible
-                    if (this.playerLinearVelocity.length() < 0.004) {
-                        this.playerLinearVelocity.set(0, 0, 0);
-                        this.isPlayerDrifting = false;
-                    }
-                }
+		    // Stop drifting when speed becomes imperceptible
+		    if (this.playerLinearVelocity.length() < 0.004) {
+		        this.playerLinearVelocity.set(0, 0, 0);
+		        this.isPlayerDrifting = false;
+		    }
+		}
             }
 
             initDesktopInteraction() {
