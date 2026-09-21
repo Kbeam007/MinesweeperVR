@@ -238,7 +238,7 @@
 
         <footer>
             <div class="hud-box interactive vr-tip">
-                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Left Stick = Move / Strafe | Right Stick = Rotate Grid | Grip = Pull Grid (Release to glide, click Grip again to brake)
+                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Left Stick = Walk/Strafe | Right Stick = Rotate Grid | Grip = Pull/Push Yourself (Release to float, Grip again to brake)
             </div>
             <div class="hud-box interactive" style="display:flex; gap: 10px;">
                 <button class="btn active" id="btn-mode-reveal">⛏️ Click: Reveal</button>
@@ -298,7 +298,7 @@
            • <b style="color:#ff4466;">🔴 LEFT HAND (RED):</b> Flag/Mark mines (Trigger or poke).<br>
            • <b>Left Thumbstick:</b> Move forward, backward, and strafe side-to-side.<br>
            • <b>Right Thumbstick:</b> Rotate the whole matrix in place freely.<br>
-           • <b>VR Grip Glide:</b> Pull and toss the field with Grip. Release it to float in weightless linear inertia. <b>Click Grip again anytime to brake & stop!</b><br>
+           • <b>Zero-G Grip Pull:</b> Hold Grip in empty space and pull/push yourself forward, backward, up, or down. Release while moving to drift in weightless inertia. <b>Click Grip again anytime to brake & stop!</b><br>
            • <b>Wrist Menu:</b> Flip your left palm upward anytime to summon the dashboard!
         </p>
         <div class="modal-buttons">
@@ -506,11 +506,11 @@
                     }
                 };
 
-                // Grip & Weightless Inertia state (Linear translation only)
+                // Player Zero-G Grip Locomotion & Weightless Inertia
                 this.grabbedBy = [];
-                this.previousControllerMatrix = new THREE.Matrix4();
-                this.linearVelocity = new THREE.Vector3();
-                this.isDrifting = false;
+                this.previousControllerPos = new THREE.Vector3();
+                this.playerLinearVelocity = new THREE.Vector3();
+                this.isPlayerDrifting = false;
 
                 this.vrUIPage = 'hud';
                 this.endGameData = { title: 'MISSION FAILED', message: 'Core detonated.', color: '#ff2222' };
@@ -533,6 +533,7 @@
                 this.camForward = new THREE.Vector3();
                 this.camRight = new THREE.Vector3();
                 this.moveVector = new THREE.Vector3();
+                this.currentControllerWorldPos = new THREE.Vector3();
 
                 this.initGraphics();
                 this.initWebXR();
@@ -548,7 +549,7 @@
                 this.scene = new THREE.Scene();
                 this.scene.background = new THREE.Color(0x020603);
 
-                // Camera Rig for smooth WebXR locomotion
+                // Camera Rig for WebXR locomotion (Player Body)
                 this.cameraRig = new THREE.Group();
                 this.scene.add(this.cameraRig);
 
@@ -915,13 +916,13 @@
 
                     ctx.font = '15px monospace';
                     ctx.fillStyle = '#88ffaa';
-                    ctx.fillText('• LEFT THUMBSTICK: Move forward/back and strafe side-to-side.', 40, 180);
+                    ctx.fillText('• LEFT THUMBSTICK: Walk forward/back and strafe side-to-side.', 40, 180);
                     ctx.fillText('• RIGHT THUMBSTICK: Rotate the entire 3D matrix in place.', 40, 208);
-                    ctx.fillText('• SQUEEZE GRIP: Drag matrix in space. Release to glide along weightless linear path!', 40, 236);
-                    ctx.fillText('• GRIP CLICK (BRAKE): Click Grip again at any time to instantly freeze matrix.', 40, 264);
-                    ctx.fillText('• FLIP LEFT PALM UP: Summons the wrist button to recall this menu.', 40, 292);
+                    ctx.fillText('• SQUEEZE GRIP: Pull & push YOURSELF through zero-g space (Lone Echo style).', 40, 236);
+                    ctx.fillText('• RELEASE TO GLIDE: Coast smoothly through the void along your push path.', 40, 264);
+                    ctx.fillText('• GRIP CLICK (BRAKE): Click Grip again at any time to instantly halt yourself.', 40, 292);
 
-                    this.registerVJButton('close-page', 40, 320, 944, 65, 'RETURN TO SYSTEM', true);
+                    this.registerVJButton('close-page', 40, 325, 944, 60, 'RETURN TO SYSTEM', true);
                 } else if (this.vrUIPage === 'gameover') {
                     ctx.fillStyle = this.endGameData.color;
                     ctx.font = 'bold 36px monospace';
@@ -976,7 +977,6 @@
                 for (let grip of this.controllerGrips) applyVisualProps(grip);
                 for (let hand of this.hands) applyVisualProps(hand);
                 
-                // Lasers & Reticles update depthTest/renderOrder with menu visibility
                 for (let controller of this.controllers) {
                     applyVisualProps(controller);
                     if (controller.userData?.reticle) {
@@ -1320,8 +1320,8 @@
                 this.worldAnchor.scale.set(1, 1, 1);
                 this.graphGroup.rotation.set(0, 0, 0);
 
-                this.linearVelocity.set(0, 0, 0);
-                this.isDrifting = false;
+                this.playerLinearVelocity.set(0, 0, 0);
+                this.isPlayerDrifting = false;
 
                 // Reset camera rig position for clean origin
                 this.cameraRig.position.set(0, 0, 0);
@@ -1691,29 +1691,29 @@
             }
 
             onXRGripStart(controller) {
-                // Instantly brake and freeze any ongoing inertia drift
-                this.linearVelocity.set(0, 0, 0);
-                this.isDrifting = false;
+                // Instantly brake and freeze any player inertia drift
+                this.playerLinearVelocity.set(0, 0, 0);
+                this.isPlayerDrifting = false;
 
                 if (!this.grabbedBy.includes(controller)) {
                     this.grabbedBy.push(controller);
                 }
-                this.previousControllerMatrix.copy(controller.matrixWorld);
+                controller.getWorldPosition(this.previousControllerPos);
             }
 
             onXRGripEnd(controller) {
                 this.grabbedBy = this.grabbedBy.filter(c => c !== controller);
                 
                 if (this.grabbedBy.length === 0) {
-                    // Activate weightless linear inertia if user was moving or flicking
-                    if (this.linearVelocity.length() > 0.02) {
-                        this.isDrifting = true;
+                    // Activate weightless linear player inertia if moving with intent
+                    if (this.playerLinearVelocity.length() > 0.02) {
+                        this.isPlayerDrifting = true;
                     } else {
-                        this.linearVelocity.set(0, 0, 0);
-                        this.isDrifting = false;
+                        this.playerLinearVelocity.set(0, 0, 0);
+                        this.isPlayerDrifting = false;
                     }
                 } else {
-                    this.previousControllerMatrix.copy(this.grabbedBy[0].matrixWorld);
+                    this.grabbedBy[0].getWorldPosition(this.previousControllerPos);
                 }
             }
 
@@ -1796,7 +1796,7 @@
 
                 /* -------------------------------------------------------------
                    1. Dual-Thumbstick Controls:
-                      - Left Stick: First-Person Locomotion (Forward/Back & Strafe)
+                      - Left Stick: Locomotion (Forward/Back & Strafe)
                       - Right Stick: Rotate Grid Matrix in Place
                 ------------------------------------------------------------- */
                 let moveX = 0, moveY = 0;
@@ -1839,7 +1839,7 @@
                     this.moveVector.addScaledVector(this.camForward, -moveY);
                     this.moveVector.addScaledVector(this.camRight, moveX);
 
-                    const moveSpeed = 2.2; // meters/second
+                    const moveSpeed = 2.2;
                     this.cameraRig.position.addScaledVector(this.moveVector, moveSpeed * dt);
                 }
 
@@ -1849,10 +1849,7 @@
                     const yawAngle = -rotX * rotSpeed * dt;
                     const pitchAngle = -rotY * rotSpeed * dt;
 
-                    // Yaw around World Y
                     const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
-
-                    // Pitch around Camera's View Right vector
                     const camRightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
                     camRightVec.y = 0;
                     camRightVec.normalize();
@@ -2000,36 +1997,38 @@
                 }
 
                 /* -------------------------------------------------------------
-                   4. Grip Movement & Zero-G Linear Inertia (No Angular Spin)
+                   4. Zero-G Grip Locomotion: Grab & Pull/Push YOURSELF
                 ------------------------------------------------------------- */
                 if (this.grabbedBy.length === 1) {
                     const c = this.grabbedBy[0];
-                    const delta = new THREE.Matrix4().copy(c.matrixWorld).multiply(this.previousControllerMatrix.invert());
-                    this.worldAnchor.applyMatrix4(delta);
+                    c.getWorldPosition(this.currentControllerWorldPos);
 
-                    // Compute instantaneous linear velocity only
-                    const deltaTrans = new THREE.Vector3().setFromMatrixPosition(delta);
-                    const instLinVel = deltaTrans.divideScalar(Math.max(dt, 0.001));
+                    // Pulling hand back moves player forward in world space:
+                    // deltaHand = currentPos - prevPos
+                    // deltaPlayer = -deltaHand = prevPos - currentPos
+                    const playerDelta = new THREE.Vector3().subVectors(this.previousControllerPos, this.currentControllerWorldPos);
+                    this.cameraRig.position.add(playerDelta);
 
-                    // Exponential moving average for smooth, weightless release
+                    // Compute player linear velocity for zero-g release glide
+                    const instPlayerVel = playerDelta.clone().divideScalar(Math.max(dt, 0.001));
                     const smoothFactor = 0.42;
-                    this.linearVelocity.lerp(instLinVel, smoothFactor);
+                    this.playerLinearVelocity.lerp(instPlayerVel, smoothFactor);
 
-                    this.previousControllerMatrix.copy(c.matrixWorld);
+                    this.previousControllerPos.copy(this.currentControllerWorldPos);
                     this.needsSpriteUpdate = true;
-                } else if (this.isDrifting && this.grabbedBy.length === 0) {
-                    // Linear glide with subtle cosmic damping
+                } else if (this.isPlayerDrifting && this.grabbedBy.length === 0) {
+                    // Drift through zero-gravity space with cosmic drag
                     const drag = 0.992;
-                    this.linearVelocity.multiplyScalar(drag);
+                    this.playerLinearVelocity.multiplyScalar(drag);
 
-                    // Apply purely translational glide
-                    this.worldAnchor.position.addScaledVector(this.linearVelocity, dt);
+                    // Apply linear glide to camera rig
+                    this.cameraRig.position.addScaledVector(this.playerLinearVelocity, dt);
                     this.needsSpriteUpdate = true;
 
-                    // Stop when drift speed becomes imperceptible
-                    if (this.linearVelocity.length() < 0.004) {
-                        this.linearVelocity.set(0, 0, 0);
-                        this.isDrifting = false;
+                    // Stop drifting when speed becomes imperceptible
+                    if (this.playerLinearVelocity.length() < 0.004) {
+                        this.playerLinearVelocity.set(0, 0, 0);
+                        this.isPlayerDrifting = false;
                     }
                 }
             }
