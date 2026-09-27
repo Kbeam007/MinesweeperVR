@@ -1877,7 +1877,7 @@
 
 				if (!wrist || !middleKnuckle || !thumbBase || !thumbTip) return false;
 
-				// 1. Vector pointing along the hand/wrist axis
+				// 1. Vector pointing straight along the hand from the wrist to the middle knuckle
 				wrist.getWorldPosition(this.jointBase);
 				middleKnuckle.getWorldPosition(this.tempVec);
 				const wristAxis = new THREE.Vector3().subVectors(this.tempVec, this.jointBase).normalize();
@@ -1887,16 +1887,17 @@
 				thumbTip.getWorldPosition(this.jointTip);
 				const thumbDir = new THREE.Vector3().subVectors(this.jointTip, this.jointBase).normalize();
 
-				// 3. Compute angle between the wrist axis and the thumb
+				// 3. Compute the angle between wrist axis and thumb
 				const dot = wristAxis.dot(thumbDir);
 				const angleRad = Math.acos(THREE.MathUtils.clamp(dot, -1, 1));
 				const angleDeg = THREE.MathUtils.radToDeg(angleRad);
 
-				// 4. Strict right-angle window: exactly 80° to 100° (90° ± 10°)
+				// 4. Must be pointing at a right angle (70° - 110°) away from the wrist axis
 				const isRightAngle = angleDeg >= 70 && angleDeg <= 110;
 
-				// 5. Thumb must be extended (> 4.2 cm)
-				const isThumbStretched = this.jointTip.distanceTo(this.jointBase) > 0.042;
+				// 5. Ensure the thumb itself is extended (not collapsed)
+				const thumbExtendedLength = this.jointTip.distanceTo(this.jointBase);
+				const isThumbStretched = thumbExtendedLength > 0.042; // > 4.2 cm
 
 				return isRightAngle && isThumbStretched;
 			}
@@ -2233,10 +2234,10 @@
 							}
 						}
 
-						// 1. Check Hand Fist
+						// 1. Check Hand Fist (index, middle, ring curled)
 						const isFistNow = this.isHandMakingFist(hand);
 
-						// 2. Check if Thumb is sticking away like a joystick / thumbs-up
+						// 2. Only trigger rotation when the thumb sticks out at a right angle from the wrist
 						const isThumbStickingOut = isFistNow && this.isThumbAtRightAngleFromWrist(hand);
 
 						if (isThumbStickingOut) {
@@ -2285,6 +2286,60 @@
 								}
 							}
 						}
+
+						// 1. Check Hand Fist (index, middle, ring curled)
+						const isFistNow = this.isHandMakingFist(hand);
+
+						// 2. Only trigger rotation when the thumb sticks out at a right angle from the wrist
+						const isThumbStickingOut = isFistNow && this.isThumbAtRightAngleFromWrist(hand);
+
+						if (isThumbStickingOut) {
+							// When using thumb-joystick rotation, suspend zero-G grab translation
+							if (this.activeGrabber === hand) {
+								this.onXRGrabEnd(hand);
+							}
+
+							const joy = this.getHandThumbJoystick(hand, cam);
+							if (joy) {
+								const rotSpeed = 2.2;
+
+								// Yaw:
+								// Thumb points UP (yawInput > 0)    -> Yaw Clockwise
+								// Thumb points DOWN (yawInput < 0)  -> Yaw Counter-Clockwise
+								const yawAngle = -joy.yawInput * rotSpeed * dt;
+
+								// Pitch:
+								// Thumb points LEFT (pitchInput < 0)  -> Pitch Clockwise
+								// Thumb points RIGHT (pitchInput > 0) -> Pitch Counter-Clockwise
+								const pitchAngle = joy.pitchInput * rotSpeed * dt;
+
+								const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
+
+								const camRightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+								camRightVec.y = 0;
+								camRightVec.normalize();
+								const qPitch = new THREE.Quaternion().setFromAxisAngle(camRightVec, pitchAngle);
+
+								const qTotal = new THREE.Quaternion().multiplyQuaternions(qPitch, qYaw);
+								this.worldAnchor.quaternion.premultiply(qTotal);
+								this.needsSpriteUpdate = true;
+							}
+						} else {
+							// Normal Zero-G locomotion when making a regular fist without the 90° thumb
+							if (isFistNow !== hand.userData.isFist) {
+								hand.userData.isFist = isFistNow;
+								if (isFistNow) {
+									if (!handIsInteracting) {
+										this.onXRGrabStart(hand);
+									}
+								} else {
+									if (this.activeGrabber === hand) {
+										this.onXRGrabEnd(hand);
+									}
+								}
+							}
+						}
+
 
 						// Position and update the 3D move arrows for the hand
 						if (hand.userData.moveGizmo) {
