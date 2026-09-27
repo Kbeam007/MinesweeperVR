@@ -1973,8 +1973,16 @@
                         if (reticle) {
                             reticle.visible = true;
                             reticle.position.copy(hits[0].point).addScaledVector(this.raycaster.ray.direction, -0.005);
-                            reticle.lookAt(cam.position);
-                        }
+                            const headWorldPos = new THREE.Vector3();
+			    if (this.renderer.xr && this.renderer.xr.isPresenting) {
+    				const xrCam = this.renderer.xr.getCamera();
+				headWorldPos.setFromMatrixPosition(xrCam.matrix);
+				headWorldPos.applyMatrix4(this.cameraRig.matrixWorld);
+			    } else {
+				this.camera.getWorldPosition(headWorldPos);
+			    }
+			    reticle.lookAt(headWorldPos);                        
+			}
 
                         if (prevNode !== targetNode) {
                             this.triggerHaptic(controller, 0.2, 15);
