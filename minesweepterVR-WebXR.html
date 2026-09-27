@@ -1739,7 +1739,7 @@
             onXRGrabEnd(grabber) {
                 if (this.activeGrabber === grabber) {
                     this.activeGrabber = null;
-                    if (this.playerLinearVelocity.length() > 0.02) {
+                    if (this.playerLinearVelocity.length() > 0.05) {
                         this.isPlayerDrifting = true;
                     } else {
                         this.playerLinearVelocity.set(0, 0, 0);
