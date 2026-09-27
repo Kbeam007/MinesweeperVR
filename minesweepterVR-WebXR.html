@@ -599,6 +599,7 @@
                     controller.userData.hoveredNode = null;
                     controller.userData.hoveredVRButton = null;
                     controller.userData.hoveredPalm = false;
+		    controller.userData.isGripping = false;
 
                     const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
                     const lineMat = new THREE.LineBasicMaterial({
@@ -653,6 +654,7 @@
                         controller.userData.hoveredNode = null;
                         controller.userData.hoveredVRButton = null;
                         controller.userData.hoveredPalm = false;
+			controller.userData.isGripping = false;
                         if (this.activeGrabber === controller) {
                             this.onXRGrabEnd(controller);
                         }
@@ -671,8 +673,8 @@
                     });
 
                     controller.addEventListener('selectstart', () => this.onXRTriggerDown(controller));
-                    controller.addEventListener('squeezestart', () => this.onXRGrabStart(controller));
-                    controller.addEventListener('squeezeend', () => this.onXRGrabEnd(controller));
+		    controller.addEventListener('squeezestart', () => {controller.userData.isGripping = true;this.onXRGrabStart(controller);});
+		    controller.addEventListener('squeezeend', () => {controller.userData.isGripping = false;this.onXRGrabEnd(controller);});
 
                     this.controllers.push(controller);
                     this.hands.push(hand);
@@ -1930,89 +1932,105 @@
                    2. Laser Raycasting (Controllers)
                 ------------------------------------------------------------- */
                 for (let controller of this.controllers) {
-                    const prevNode = controller.userData.hoveredNode;
-                    controller.userData.hoveredPalm = false;
-                    controller.userData.hoveredVRButton = null;
-                    controller.userData.hoveredNode = null;
+		    const prevNode = controller.userData.hoveredNode;
+		    controller.userData.hoveredPalm = false;
+		    controller.userData.hoveredVRButton = null;
+		    controller.userData.hoveredNode = null;
 
-                    this.workingMatrix.identity().extractRotation(controller.matrixWorld);
-                    this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-                    this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.workingMatrix);
+		    const laser = controller.getObjectByName('laser');
+		    const reticle = controller.userData?.reticle;
 
-                    const laser = controller.getObjectByName('laser');
-                    const reticle = controller.userData?.reticle;
-                    if (reticle) reticle.visible = false;
+		    // Check if corresponding hand (by handedness) or this controller is gripping/fist
+		    const handedness = controller.userData?.handedness;
+		    const matchingHand = this.hands.find(h => h.userData?.handedness === handedness);
+		    const isHandFist = matchingHand && matchingHand.userData?.isFist;
+		    const isGrabbed = controller.userData.isGripping || isHandFist;
 
-                    if (this.palmButtonMesh.visible) {
-                        const palmHits = this.raycaster.intersectObject(this.palmButtonMesh, false);
-                        if (palmHits.length > 0) {
-                            controller.userData.hoveredPalm = true;
-                            anyPalmHovered = true;
-                            if (laser) laser.scale.z = palmHits[0].distance;
-                            if (reticle) {
-                                reticle.visible = true;
-                                reticle.position.copy(palmHits[0].point);
-                                reticle.quaternion.copy(this.palmButtonMesh.quaternion);
-                            }
-                            continue;
-                        }
-                    }
+		    // Hide laser & reticle when gripping or in fist
+		    if (isGrabbed) {
+		        if (laser) laser.visible = false;
+		        if (reticle) reticle.visible = false;
+		        continue; // Skip raycasting and node hover while gripping
+		    } else {
+		        if (laser) laser.visible = true;
+		    }
 
-                    if (this.hudMesh.visible) {
-                        const hudHits = this.raycaster.intersectObject(this.hudMesh, false);
-                        if (hudHits.length > 0) {
-                            const hit = hudHits[0];
-                            const uv = hit.uv;
-                            if (uv) {
-                                const canvasX = uv.x * 1024;
-                                const canvasY = (1 - uv.y) * 420;
+		    this.workingMatrix.identity().extractRotation(controller.matrixWorld);
+		    this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+		    this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.workingMatrix);
 
-                                for (let btn of this.virtualButtons) {
-                                    if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
-                                        controller.userData.hoveredVRButton = btn;
-                                        break;
-                                    }
-                                }
-                            }
-                            if (laser) laser.scale.z = hit.distance;
+		    if (reticle) reticle.visible = false;
 
-                            if (reticle) {
-                                reticle.visible = true;
-                                reticle.position.copy(hit.point).addScaledVector(this.raycaster.ray.direction, -0.002);
-                                reticle.quaternion.copy(this.hudMesh.getWorldQuaternion(new THREE.Quaternion()));
-                            }
-                            continue;
-                        }
-                    }
+		    if (this.palmButtonMesh.visible) {
+		        const palmHits = this.raycaster.intersectObject(this.palmButtonMesh, false);
+		        if (palmHits.length > 0) {
+		            controller.userData.hoveredPalm = true;
+		            anyPalmHovered = true;
+		            if (laser) laser.scale.z = palmHits[0].distance;
+		            if (reticle) {
+		                reticle.visible = true;
+		                reticle.position.copy(palmHits[0].point);
+		                reticle.quaternion.copy(this.palmButtonMesh.quaternion);
+		            }
+		            continue;
+		        }
+		    }
 
-                    const hits = this.raycaster.intersectObjects(nodeMeshes, false);
-                    if (hits.length > 0) {
-                        const targetNode = this.nodes[hits[0].object.userData.nodeId];
-                        controller.userData.hoveredNode = targetNode;
-                        currentlyHoveredNodeIds.add(targetNode.id);
+		    if (this.hudMesh.visible) {
+		        const hudHits = this.raycaster.intersectObject(this.hudMesh, false);
+		        if (hudHits.length > 0) {
+		            const hit = hudHits[0];
+		            const uv = hit.uv;
+		            if (uv) {
+		                const canvasX = uv.x * 1024;
+		                const canvasY = (1 - uv.y) * 420;
 
-                        if (laser) laser.scale.z = hits[0].distance;
-                        if (reticle) {
-                            reticle.visible = true;
-                            reticle.position.copy(hits[0].point).addScaledVector(this.raycaster.ray.direction, -0.005);
-                            const headWorldPos = new THREE.Vector3();
-                            if (this.renderer.xr && this.renderer.xr.isPresenting) {
-                                const xrCam = this.renderer.xr.getCamera();
-                                headWorldPos.setFromMatrixPosition(xrCam.matrix);
-                                headWorldPos.applyMatrix4(this.cameraRig.matrixWorld);
-                            } else {
-                                this.camera.getWorldPosition(headWorldPos);
-                            }
-                            reticle.lookAt(headWorldPos);                        
-                        }
+		                for (let btn of this.virtualButtons) {
+                		    if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
+		                        controller.userData.hoveredVRButton = btn;
+                		        break;
+		                    }
+		                }
+		            }
+		            if (laser) laser.scale.z = hit.distance;
 
-                        if (prevNode !== targetNode) {
-                            this.triggerHaptic(controller, 0.2, 15);
-                        }
-                    } else {
-                        if (laser) laser.scale.z = 4.5;
-                    }
-                }
+		            if (reticle) {
+		                reticle.visible = true;
+		                reticle.position.copy(hit.point).addScaledVector(this.raycaster.ray.direction, -0.002);
+                		reticle.quaternion.copy(this.hudMesh.getWorldQuaternion(new THREE.Quaternion()));
+              		    }
+		            continue;
+		        }
+		    }
+
+		    const hits = this.raycaster.intersectObjects(nodeMeshes, false);
+		    if (hits.length > 0) {
+		        const targetNode = this.nodes[hits[0].object.userData.nodeId];
+		        controller.userData.hoveredNode = targetNode;
+		        currentlyHoveredNodeIds.add(targetNode.id);
+
+		        if (laser) laser.scale.z = hits[0].distance;
+		        if (reticle) {
+		            reticle.visible = true;
+		            reticle.position.copy(hits[0].point).addScaledVector(this.raycaster.ray.direction, -0.005);
+		            const headWorldPos = new THREE.Vector3();
+		            if (this.renderer.xr && this.renderer.xr.isPresenting) {
+		                const xrCam = this.renderer.xr.getCamera();
+		                headWorldPos.setFromMatrixPosition(xrCam.matrix);
+		                headWorldPos.applyMatrix4(this.cameraRig.matrixWorld);
+		            } else {
+		                this.camera.getWorldPosition(headWorldPos);
+		            }
+		            reticle.lookAt(headWorldPos);                        
+		        }
+
+		        if (prevNode !== targetNode) {
+		            this.triggerHaptic(controller, 0.2, 15);
+		        }
+		    } else {
+		        if (laser) laser.scale.z = 4.5;
+		    }
+		}
 
                 /* -------------------------------------------------------------
                    3. Direct Finger Pokes & Hand Grip (Fist) Tracking
