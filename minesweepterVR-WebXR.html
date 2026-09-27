@@ -238,7 +238,7 @@
 
         <footer>
             <div class="hud-box interactive vr-tip">
-                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Left Stick = Walk/Strafe | Right Stick = Rotate Grid | Grip = Pull/Push Yourself (Release to float, Grip again to brake)
+                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Grip / Fist = Pull/Push Yourself (Release to float, Grip/Fist again to brake)
             </div>
             <div class="hud-box interactive" style="display:flex; gap: 10px;">
                 <button class="btn active" id="btn-mode-reveal">⛏️ Click: Reveal</button>
@@ -296,10 +296,9 @@
            • <b>Yellow Nodes:</b> Clue nodes showing unrevealed neighboring mine counts.<br>
            • <b style="color:#00d0ff;">🔵 RIGHT HAND (BLUE):</b> Open/Reveal nodes (Trigger or poke).<br>
            • <b style="color:#ff4466;">🔴 LEFT HAND (RED):</b> Flag/Mark mines (Trigger or poke).<br>
-           • <b>Left Thumbstick:</b> Move forward, backward, and strafe side-to-side.<br>
-           • <b>Right Thumbstick:</b> Rotate the whole matrix in place freely.<br>
-           • <b>Zero-G Grip Pull:</b> Hold Grip in empty space and pull/push yourself forward, backward, up, or down. Release while moving to drift in weightless inertia. <b>Click Grip again anytime to brake & stop!</b><br>
-           • <b>Wrist Menu:</b> Flip your left palm or twist your left controller upward to summon the dashboard!
+           • <b>Thumbsticks:</b> Left Stick = Walk/Strafe | Right Stick = Rotate Matrix.<br>
+           • <b>Zero-G Locomotion (Controllers & Hands):</b> Squeeze <b>Grip</b> on your controller OR close either hand into a <b>Fist</b> in empty space to pull/push yourself forward, backward, up, or down. Release to coast in weightless zero-g! <b>Make a fist or squeeze grip again at any time to instantly brake & stop.</b><br>
+           • <b>Wrist Menu:</b> Flip your left palm upward to summon the dashboard!
         </p>
         <div class="modal-buttons">
             <button class="btn modal-close">Understood</button>
@@ -506,9 +505,9 @@
                     }
                 };
 
-                // Player Zero-G Grip Locomotion & Weightless Inertia
-                this.grabbedBy = [];
-                this.previousControllerPos = new THREE.Vector3();
+                // Player Zero-G Locomotion & Weightless Inertia (Controllers + Hands)
+                this.activeGrabber = null; // can be a controller or a hand
+                this.previousGrabberPos = new THREE.Vector3();
                 this.playerLinearVelocity = new THREE.Vector3();
                 this.isPlayerDrifting = false;
 
@@ -534,7 +533,9 @@
                 this.camForward = new THREE.Vector3();
                 this.camRight = new THREE.Vector3();
                 this.moveVector = new THREE.Vector3();
-                this.currentControllerWorldPos = new THREE.Vector3();
+                this.currentGrabberWorldPos = new THREE.Vector3();
+                this.jointTip = new THREE.Vector3();
+                this.jointBase = new THREE.Vector3();
 
                 this.initGraphics();
                 this.initWebXR();
@@ -550,7 +551,6 @@
                 this.scene = new THREE.Scene();
                 this.scene.background = new THREE.Color(0x020603);
 
-                // Camera Rig for WebXR locomotion (Player Body)
                 this.cameraRig = new THREE.Group();
                 this.scene.add(this.cameraRig);
 
@@ -637,6 +637,7 @@
                     this.controllerGrips.push(grip);
 
                     const hand = this.renderer.xr.getHand(i);
+                    hand.userData.isFist = false;
                     hand.add(this.handModelFactory.createHandModel(hand, 'mesh'));
                     this.cameraRig.add(hand);
 
@@ -652,6 +653,9 @@
                         controller.userData.hoveredNode = null;
                         controller.userData.hoveredVRButton = null;
                         controller.userData.hoveredPalm = false;
+                        if (this.activeGrabber === controller) {
+                            this.onXRGrabEnd(controller);
+                        }
                     });
 
                     hand.addEventListener('connected', (e) => {
@@ -661,11 +665,14 @@
                     });
                     hand.addEventListener('disconnected', () => {
                         hand.userData.handedness = null;
+                        if (this.activeGrabber === hand) {
+                            this.onXRGrabEnd(hand);
+                        }
                     });
 
                     controller.addEventListener('selectstart', () => this.onXRTriggerDown(controller));
-                    controller.addEventListener('squeezestart', () => this.onXRGripStart(controller));
-                    controller.addEventListener('squeezeend', () => this.onXRGripEnd(controller));
+                    controller.addEventListener('squeezestart', () => this.onXRGrabStart(controller));
+                    controller.addEventListener('squeezeend', () => this.onXRGrabEnd(controller));
 
                     this.controllers.push(controller);
                     this.hands.push(hand);
@@ -715,7 +722,7 @@
             }
 
             /* -------------------------------------------------------------
-               4. Spatial HUD: Always On-Top & Smoothly Locked to Player Rig
+               4. Spatial HUD & Wrist Menu
             ------------------------------------------------------------- */
             initSpatialPanel() {
                 this.hudCanvas = document.createElement('canvas');
@@ -738,7 +745,6 @@
 
                 this.hudMesh = new THREE.Mesh(hudGeo, hudMat);
                 this.hudMesh.renderOrder = 9999;
-                
                 this.cameraRig.add(this.hudMesh);
 
                 this.virtualButtons = [];
@@ -918,11 +924,11 @@
 
                     ctx.font = '15px monospace';
                     ctx.fillStyle = '#88ffaa';
-                    ctx.fillText('• LEFT THUMBSTICK: Walk forward/back and strafe side-to-side.', 40, 180);
-                    ctx.fillText('• RIGHT THUMBSTICK: Rotate the entire 3D matrix in place.', 40, 208);
-                    ctx.fillText('• SQUEEZE GRIP: Pull & push YOURSELF through zero-g space (Lone Echo style).', 40, 236);
-                    ctx.fillText('• RELEASE TO GLIDE: Coast smoothly through the void along your push path.', 40, 264);
-                    ctx.fillText('• GRIP CLICK (BRAKE): Click Grip again at any time to instantly halt yourself.', 40, 292);
+                    ctx.fillText('• THUMBSTICKS: Left Stick = Move/Strafe | Right Stick = Rotate Matrix.', 40, 180);
+                    ctx.fillText('• ZERO-G GRIP / FIST: Squeeze Grip OR form a Fist in empty space to grab space.', 40, 208);
+                    ctx.fillText('• PULL & PUSH: Drag yourself smoothly in any direction (X, Y, Z).', 40, 236);
+                    ctx.fillText('• RELEASE TO GLIDE: Open your hand / release grip to coast in weightless drift.', 40, 264);
+                    ctx.fillText('• BRAKE: Make a fist or squeeze grip again at any time to instantly brake to a stop.', 40, 292);
 
                     this.registerVJButton('close-page', 40, 325, 944, 60, 'RETURN TO SYSTEM', true);
                 } else if (this.vrUIPage === 'gameover') {
@@ -1339,6 +1345,7 @@
 
                 this.playerLinearVelocity.set(0, 0, 0);
                 this.isPlayerDrifting = false;
+                this.activeGrabber = null;
 
                 this.cameraRig.position.set(0, 0, 0);
 
@@ -1713,29 +1720,58 @@
                 }
             }
 
-            onXRGripStart(controller) {
+            getGrabberWorldPosition(grabber, outPos) {
+                if (grabber.joints && grabber.joints['wrist']) {
+                    grabber.joints['wrist'].getWorldPosition(outPos);
+                } else {
+                    grabber.getWorldPosition(outPos);
+                }
+            }
+
+            onXRGrabStart(grabber) {
                 this.playerLinearVelocity.set(0, 0, 0);
                 this.isPlayerDrifting = false;
 
-                if (!this.grabbedBy.includes(controller)) {
-                    this.grabbedBy.push(controller);
-                }
-                controller.getWorldPosition(this.previousControllerPos);
+                this.activeGrabber = grabber;
+                this.getGrabberWorldPosition(grabber, this.previousGrabberPos);
             }
 
-            onXRGripEnd(controller) {
-                this.grabbedBy = this.grabbedBy.filter(c => c !== controller);
-                
-                if (this.grabbedBy.length === 0) {
+            onXRGrabEnd(grabber) {
+                if (this.activeGrabber === grabber) {
+                    this.activeGrabber = null;
                     if (this.playerLinearVelocity.length() > 0.02) {
                         this.isPlayerDrifting = true;
                     } else {
                         this.playerLinearVelocity.set(0, 0, 0);
                         this.isPlayerDrifting = false;
                     }
-                } else {
-                    this.grabbedBy[0].getWorldPosition(this.previousControllerPos);
                 }
+            }
+
+            isHandMakingFist(hand) {
+                if (!hand.joints) return false;
+
+                const fingers = [
+                    ['index-finger-tip', 'index-finger-phalanx-proximal'],
+                    ['middle-finger-tip', 'middle-finger-phalanx-proximal'],
+                    ['ring-finger-tip', 'ring-finger-phalanx-proximal'],
+                    ['pinky-finger-tip', 'pinky-finger-phalanx-proximal']
+                ];
+
+                let curledFingers = 0;
+                for (let [tipName, baseName] of fingers) {
+                    const tip = hand.joints[tipName];
+                    const base = hand.joints[baseName];
+                    if (tip && base) {
+                        tip.getWorldPosition(this.jointTip);
+                        base.getWorldPosition(this.jointBase);
+                        if (this.jointTip.distanceTo(this.jointBase) < 0.062) {
+                            curledFingers++;
+                        }
+                    }
+                }
+                // When 3 or more fingers curl tightly inward toward the palm, consider it a fist
+                return curledFingers >= 3;
             }
 
             updatePalmMenuState() {
@@ -1743,10 +1779,8 @@
                 let isLeftHandTracked = false;
                 let palmTargetPos = null;
 
-                // Threshold corresponds to ~56 degrees from vertical
                 const UPWARD_THRESHOLD = 0.85;
 
-                // 1. Check Hand Tracking (Only if hand is actively visible and tracked)
                 for (let hand of this.hands) {
                     if (hand.visible && hand.userData?.handedness === 'left' && hand.joints) {
                         const wrist = hand.joints['wrist'];
@@ -1776,15 +1810,12 @@
                     }
                 }
 
-                // 2. Controller Fallback (Using physical Grip space instead of Target Ray)
                 if (!isLeftHandTracked) {
                     for (let i = 0; i < this.controllers.length; i++) {
                         const controller = this.controllers[i];
                         const grip = this.controllerGrips[i];
 
                         if (controller.userData?.handedness === 'left') {
-                            // In Grip Space: +X is inner palm, +Y is faceplate/thumbstick
-                            // Blending (0.7, 0.7, 0.0) captures both palm-up and watch-glance gestures
                             this.controllerPalmDir.set(0.7, 0.7, 0.0).normalize();
                             const quat = grip.getWorldQuaternion(this.tempQuat);
                             this.controllerPalmDir.applyQuaternion(quat);
@@ -1809,7 +1840,6 @@
                     this.palmButtonMesh.visible = true;
                     this.palmButtonMesh.position.copy(palmTargetPos);
 
-                    // Orient button to face real-world headset position
                     if (this.renderer.xr && this.renderer.xr.isPresenting) {
                         this.cameraRig.updateMatrixWorld(true);
                         const xrCam = this.renderer.xr.getCamera();
@@ -1832,9 +1862,7 @@
                 this.updatePalmMenuState();
 
                 /* -------------------------------------------------------------
-                   1. Dual-Thumbstick Controls:
-                      - Left Stick: Locomotion (Forward/Back & Strafe)
-                      - Right Stick: Rotate Grid Matrix in Place
+                   1. Dual-Thumbstick Controls
                 ------------------------------------------------------------- */
                 let moveX = 0, moveY = 0;
                 let rotX = 0, rotY = 0;
@@ -1864,26 +1892,21 @@
                     }
                 }
 
-                // Left Stick Smooth Locomotion
                 if (Math.abs(moveX) > 0.05 || Math.abs(moveY) > 0.05) {
-			// 1. Get true 3D looking direction (including pitch up/down)
-			cam.getWorldDirection(this.camForward);
-			this.camForward.normalize();
+                    cam.getWorldDirection(this.camForward);
+                    this.camForward.normalize();
 
-			// 2. Derive sideways strafe vector relative to the camera's actual tilt
-			this.camRight.set(1, 0, 0).applyQuaternion(cam.quaternion).normalize();
+                    this.camRight.set(1, 0, 0).applyQuaternion(cam.quaternion).normalize();
 
-			// 3. Calculate movement vector
-			this.moveVector.set(0, 0, 0);
-			this.moveVector.addScaledVector(this.camForward, -moveY);
-			this.moveVector.addScaledVector(this.camRight, moveX);
+                    this.moveVector.set(0, 0, 0);
+                    this.moveVector.addScaledVector(this.camForward, -moveY);
+                    this.moveVector.addScaledVector(this.camRight, moveX);
 
-			const moveSpeed = 2.2;
-			this.cameraRig.position.addScaledVector(this.moveVector, moveSpeed * dt);
-			this.needsSpriteUpdate = true;
-		}
+                    const moveSpeed = 2.2;
+                    this.cameraRig.position.addScaledVector(this.moveVector, moveSpeed * dt);
+                    this.needsSpriteUpdate = true;
+                }
 
-                // Right Stick Matrix Rotation
                 if (Math.abs(rotX) > 0.05 || Math.abs(rotY) > 0.05) {
                     const rotSpeed = 2.2;
                     const yawAngle = -rotX * rotSpeed * dt;
@@ -1904,7 +1927,7 @@
                 let anyPalmHovered = false;
 
                 /* -------------------------------------------------------------
-                   2. Laser Raycasting
+                   2. Laser Raycasting (Controllers)
                 ------------------------------------------------------------- */
                 for (let controller of this.controllers) {
                     const prevNode = controller.userData.hoveredNode;
@@ -1920,7 +1943,6 @@
                     const reticle = controller.userData?.reticle;
                     if (reticle) reticle.visible = false;
 
-                    // Palm Button
                     if (this.palmButtonMesh.visible) {
                         const palmHits = this.raycaster.intersectObject(this.palmButtonMesh, false);
                         if (palmHits.length > 0) {
@@ -1936,7 +1958,6 @@
                         }
                     }
 
-                    // Spatial HUD UI
                     if (this.hudMesh.visible) {
                         const hudHits = this.raycaster.intersectObject(this.hudMesh, false);
                         if (hudHits.length > 0) {
@@ -1964,7 +1985,6 @@
                         }
                     }
 
-                    // Graph Nodes
                     const hits = this.raycaster.intersectObjects(nodeMeshes, false);
                     if (hits.length > 0) {
                         const targetNode = this.nodes[hits[0].object.userData.nodeId];
@@ -1976,15 +1996,15 @@
                             reticle.visible = true;
                             reticle.position.copy(hits[0].point).addScaledVector(this.raycaster.ray.direction, -0.005);
                             const headWorldPos = new THREE.Vector3();
-			    if (this.renderer.xr && this.renderer.xr.isPresenting) {
-    				const xrCam = this.renderer.xr.getCamera();
-				headWorldPos.setFromMatrixPosition(xrCam.matrix);
-				headWorldPos.applyMatrix4(this.cameraRig.matrixWorld);
-			    } else {
-				this.camera.getWorldPosition(headWorldPos);
-			    }
-			    reticle.lookAt(headWorldPos);                        
-			}
+                            if (this.renderer.xr && this.renderer.xr.isPresenting) {
+                                const xrCam = this.renderer.xr.getCamera();
+                                headWorldPos.setFromMatrixPosition(xrCam.matrix);
+                                headWorldPos.applyMatrix4(this.cameraRig.matrixWorld);
+                            } else {
+                                this.camera.getWorldPosition(headWorldPos);
+                            }
+                            reticle.lookAt(headWorldPos);                        
+                        }
 
                         if (prevNode !== targetNode) {
                             this.triggerHaptic(controller, 0.2, 15);
@@ -1995,22 +2015,26 @@
                 }
 
                 /* -------------------------------------------------------------
-                   3. Direct Finger Pokes
+                   3. Direct Finger Pokes & Hand Grip (Fist) Tracking
                 ------------------------------------------------------------- */
                 for (let hand of this.hands) {
-                    if (hand.joints) {
+                    if (hand.joints && hand.visible) {
                         const indexTip = hand.joints['index-finger-tip'];
+                        let handIsInteracting = false;
+
                         if (indexTip) {
                             const tipPos = this.tempVec.setFromMatrixPosition(indexTip.matrixWorld);
 
                             if (this.palmButtonMesh.visible && tipPos.distanceTo(this.palmButtonMesh.position) < 0.05) {
                                 this.openSpatialMenu();
+                                handIsInteracting = true;
                                 return;
                             }
 
                             for (let n of this.nodes) {
                                 const nWorld = n.mesh.getWorldPosition(this.tempNodePos);
                                 if (tipPos.distanceTo(nWorld) < NODE_RADIUS * 1.3) {
+                                    handIsInteracting = true;
                                     currentlyHoveredNodeIds.add(n.id);
                                     const isRightHand = hand.userData?.handedness === 'right';
 
@@ -2025,6 +2049,21 @@
                                             setTimeout(() => { n.userDataPokeDebounce = false; }, 400);
                                         }
                                     }
+                                }
+                            }
+                        }
+
+                        // Check Hand Fist / Grip Gestures for Zero-G Locomotion
+                        const isFistNow = this.isHandMakingFist(hand);
+                        if (isFistNow !== hand.userData.isFist) {
+                            hand.userData.isFist = isFistNow;
+                            if (isFistNow) {
+                                if (!handIsInteracting) {
+                                    this.onXRGrabStart(hand);
+                                }
+                            } else {
+                                if (this.activeGrabber === hand) {
+                                    this.onXRGrabEnd(hand);
                                 }
                             }
                         }
@@ -2045,13 +2084,12 @@
                 }
 
                 /* -------------------------------------------------------------
-                   4. Zero-G Grip Locomotion: Grab & Pull/Push YOURSELF
+                   4. Zero-G Locomotion: Grab & Pull/Push (Controllers & Fists)
                 ------------------------------------------------------------- */
-                if (this.grabbedBy.length === 1) {
-                    const c = this.grabbedBy[0];
-                    c.getWorldPosition(this.currentControllerWorldPos);
+                if (this.activeGrabber) {
+                    this.getGrabberWorldPosition(this.activeGrabber, this.currentGrabberWorldPos);
 
-                    const playerDelta = new THREE.Vector3().subVectors(this.previousControllerPos, this.currentControllerWorldPos);
+                    const playerDelta = new THREE.Vector3().subVectors(this.previousGrabberPos, this.currentGrabberWorldPos);
                     this.cameraRig.position.add(playerDelta);
 
                     const SPEED_BOOST = 2.0; 
@@ -2060,9 +2098,9 @@
                     const smoothFactor = 0.55;
                     this.playerLinearVelocity.lerp(instPlayerVel, smoothFactor);
 
-                    this.previousControllerPos.copy(this.currentControllerWorldPos);
+                    this.previousGrabberPos.copy(this.currentGrabberWorldPos);
                     this.needsSpriteUpdate = true;
-                } else if (this.isPlayerDrifting && this.grabbedBy.length === 0) {
+                } else if (this.isPlayerDrifting) {
                     const drag = 0.996; 
                     this.playerLinearVelocity.multiplyScalar(drag);
 
