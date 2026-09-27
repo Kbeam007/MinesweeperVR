@@ -1,52 +1,2542 @@
-// 1. Check Hand Fist (index, middle, ring curled)
-const isFistNow = this.isHandMakingFist(hand);
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Minesweeper VR - Meta Quest & Desktop</title>
+    <style>
+        :root {
+            --neon-green: #00ff66;
+            --neon-green-dim: #008833;
+            --neon-glow: 0 0 10px rgba(0, 255, 102, 0.6), 0 0 20px rgba(0, 255, 102, 0.3);
+            --bg-dark: rgba(5, 15, 8, 0.92);
+        }
 
-// 2. Only trigger rotation when the thumb sticks out at a right angle from the wrist
-const isThumbStickingOut = isFistNow && this.isThumbAtRightAngleFromWrist(hand);
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            margin: 0;
+            padding: 0;
+        }
 
-if (isThumbStickingOut) {
-    // When using thumb-joystick rotation, suspend zero-G grab translation
-    if (this.activeGrabber === hand) {
-        this.onXRGrabEnd(hand);
-    }
+        body {
+            background-color: #000;
+            overflow: hidden;
+            font-family: 'Courier New', Courier, monospace;
+            color: var(--neon-green);
+        }
 
-    const joy = this.getHandThumbJoystick(hand, cam);
-    if (joy) {
-        const rotSpeed = 2.2;
+        #webgl-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            display: block;
+            z-index: 1;
+        }
 
-        // Yaw:
-        // Thumb points UP (yawInput > 0)    -> Yaw Clockwise
-        // Thumb points DOWN (yawInput < 0)  -> Yaw Counter-Clockwise
-        const yawAngle = -joy.yawInput * rotSpeed * dt;
+        .ui-layer {
+            position: absolute;
+            z-index: 10;
+            pointer-events: none;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 16px;
+        }
 
-        // Pitch:
-        // Thumb points LEFT (pitchInput < 0)  -> Pitch Clockwise
-        // Thumb points RIGHT (pitchInput > 0) -> Pitch Counter-Clockwise
-        const pitchAngle = joy.pitchInput * rotSpeed * dt;
+        .interactive {
+            pointer-events: auto;
+        }
 
-        const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
 
-        const camRightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-        camRightVec.y = 0;
-        camRightVec.normalize();
-        const qPitch = new THREE.Quaternion().setFromAxisAngle(camRightVec, pitchAngle);
+        .hud-box {
+            background: var(--bg-dark);
+            border: 2px solid var(--neon-green);
+            box-shadow: var(--neon-glow);
+            border-radius: 8px;
+            padding: 10px 16px;
+            font-size: 13px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
 
-        const qTotal = new THREE.Quaternion().multiplyQuaternions(qPitch, qYaw);
-        this.worldAnchor.quaternion.premultiply(qTotal);
-        this.needsSpriteUpdate = true;
-    }
-} else {
-    // Normal Zero-G locomotion when making a regular fist without the 90° thumb
-    if (isFistNow !== hand.userData.isFist) {
-        hand.userData.isFist = isFistNow;
-        if (isFistNow) {
-            if (!handIsInteracting) {
-                this.onXRGrabStart(hand);
-            }
-        } else {
-            if (this.activeGrabber === hand) {
-                this.onXRGrabEnd(hand);
-            }
+        .stats-hud {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .stat-item span {
+            font-weight: bold;
+            font-size: 16px;
+            text-shadow: var(--neon-glow);
+        }
+
+        .btn {
+            background: #000;
+            color: var(--neon-green);
+            border: 2px solid var(--neon-green);
+            box-shadow: var(--neon-glow);
+            padding: 8px 14px;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            text-transform: uppercase;
+        }
+
+        .btn:hover {
+            background: var(--neon-green);
+            color: #000;
+            box-shadow: 0 0 15px var(--neon-green);
+        }
+
+        .btn:active {
+            transform: scale(0.96);
+        }
+
+        .btn.active {
+            background: var(--neon-green);
+            color: #000;
+        }
+
+        footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .vr-tip {
+            font-size: 11px;
+            color: #88ffaa;
+            text-transform: none;
+            letter-spacing: 0px;
+        }
+
+        .modal {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 12, 5, 0.96);
+            border: 2px solid var(--neon-green);
+            box-shadow: 0 0 25px rgba(0, 255, 102, 0.8);
+            border-radius: 12px;
+            padding: 24px 30px;
+            text-align: center;
+            z-index: 100;
+            display: none;
+            flex-direction: column;
+            gap: 16px;
+            min-width: 380px;
+            max-width: 90vw;
+        }
+
+        .modal h2 {
+            font-size: 20px;
+            text-shadow: var(--neon-glow);
+            letter-spacing: 2px;
+        }
+
+        .modal p {
+            font-size: 13px;
+            line-height: 1.5;
+            color: #88ffaa;
+            text-align: left;
+        }
+
+        .modal-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 14px;
+            margin-top: 10px;
+        }
+
+        .diff-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .gen-options {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .gen-options .btn {
+            text-align: left;
+            padding: 10px 14px;
+        }
+
+        .gen-desc {
+            font-size: 11px;
+            font-weight: normal;
+            color: #88ffaa;
+            display: block;
+            margin-top: 3px;
+            text-transform: none;
+        }
+
+        @media (max-width: 768px) {
+            .stats-hud { gap: 8px; font-size: 10px; }
+            .stat-item span { font-size: 12px; }
+            .btn { padding: 6px 10px; font-size: 11px; }
+            .diff-grid { grid-template-columns: 1fr; }
+            .diff-grid .btn { grid-column: span 1 !important; }
+        }
+    </style>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
         }
     }
-}
+    </script>
+</head>
+<body>
+    <canvas id="webgl-canvas"></canvas>
+
+    <!-- 2D Screen Overlay -->
+    <div class="ui-layer">
+        <header>
+            <div class="hud-box stats-hud interactive">
+                <div class="stat-item">Mines: <span id="hud-mines">0</span></div>
+                <div class="stat-item">Left: <span id="hud-nodes">0</span></div>
+                <div class="stat-item">Diff: <span id="hud-diff" style="color:#88ffaa;">Easy</span></div>
+                <div class="stat-item">Gen: <span id="hud-gen" style="color:#88ffaa;">Tree</span></div>
+                <div class="stat-item">Desktop Tool: <span id="hud-mode" style="color:#88ffaa;">⛏️ Reveal</span></div>
+            </div>
+            <div class="hud-box interactive" style="display: flex; gap: 8px;">
+                <button class="btn" id="btn-toggle-spatial-menu">3D Menu: Open</button>
+                <button class="btn" id="btn-gen-mode">Gen Mode</button>
+                <button class="btn" id="btn-difficulty">Difficulty</button>
+                <button class="btn" id="btn-tutorial">Tutorial</button>
+            </div>
+        </header>
+
+        <footer>
+            <div class="hud-box interactive vr-tip">
+                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Grip / Fist = Pull/Push Yourself (Release to float, Grip/Fist again to brake)
+            </div>
+            <div class="hud-box interactive" style="display:flex; gap: 10px;">
+                <button class="btn active" id="btn-mode-reveal">⛏️ Click: Reveal</button>
+                <button class="btn" id="btn-mode-flag">🚩 Click: Flag</button>
+                <button class="btn" id="btn-reset">New Game</button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- 2D Modals -->
+    <div id="modal-gen" class="modal interactive">
+        <h2>GENERATION ALGORITHM</h2>
+        <div class="gen-options">
+            <button class="btn" data-gen="tree">
+                Tree Branching
+                <span class="gen-desc">Recursive branching with distance checks and closed cross-links.</span>
+            </button>
+            <button class="btn" data-gen="poisson-uniform">
+                Poisson Disc (Uniform Random)
+                <span class="gen-desc">Standard Bridson: picks any active seed randomly across the cloud.</span>
+            </button>
+            <button class="btn" data-gen="poisson-seq">
+                Poisson Disc (Sequential FIFO)
+                <span class="gen-desc">Expands layer by layer uniformly outward from the center origin.</span>
+            </button>
+            <button class="btn" data-gen="poisson-biased">
+                Poisson Disc (Biased SwapBack)
+                <span class="gen-desc">Continuous snake-like expansion frontier creating organic branches.</span>
+            </button>
+        </div>
+        <div class="modal-buttons">
+            <button class="btn modal-close">Back</button>
+        </div>
+    </div>
+
+    <div id="modal-difficulty" class="modal interactive">
+        <h2>SELECT DIFFICULTY</h2>
+        <div class="diff-grid">
+            <button class="btn" data-diff="easy">Easy (5 Mines / 21 Nodes)</button>
+            <button class="btn" data-diff="medium">Medium (30 Mines / 85 Nodes)</button>
+            <button class="btn" data-diff="hard">Hard (45 Mines / 121 Nodes)</button>
+            <button class="btn" data-diff="vhard">Very Hard (130 Mines / 364 Nodes)</button>
+            <button class="btn" data-diff="insane" style="grid-column: span 2;">Insane (500 Mines / 1,093 Nodes)</button>
+        </div>
+        <div class="modal-buttons">
+            <button class="btn modal-close">Back</button>
+        </div>
+    </div>
+
+    <div id="modal-tutorial" class="modal interactive">
+        <h2>3D MINESWEEPER RULES & CONTROLS</h2>
+        <p>• Nodes form a 3D web connected via cybernetic data links.<br>
+           • <b>Safe Start:</b> Your first reveal or poke is always 100% safe.<br>
+           • <b>Blue Nodes:</b> Revealed sectors showing adjacent mine count.<br>
+           • <b>Yellow Nodes:</b> Clue nodes showing unrevealed neighboring mine counts.<br>
+           • <b style="color:#00d0ff;">🔵 RIGHT HAND (BLUE):</b> Open/Reveal nodes (Trigger or poke).<br>
+           • <b style="color:#ff4466;">🔴 LEFT HAND (RED):</b> Flag/Mark mines (Trigger or poke).<br>
+           • <b>Thumbsticks:</b> Left Stick = Walk/Strafe | Right Stick = Rotate Matrix.<br>
+           • <b>Zero-G Locomotion (Controllers & Hands):</b> Squeeze <b>Grip</b> on your controller OR close either hand into a <b>Fist</b> in empty space to pull/push yourself forward, backward, up, or down. Release to coast in weightless zero-g! <b>Make a fist or squeeze grip again at any time to instantly brake & stop.</b><br>
+           • <b>Wrist Menu:</b> Flip your left palm upward to summon the dashboard!
+        </p>
+        <div class="modal-buttons">
+            <button class="btn modal-close">Understood</button>
+        </div>
+    </div>
+
+    <div id="modal-gameover" class="modal interactive">
+        <h2 id="endgame-title" style="color: #ff3333;">MISSION FAILED</h2>
+        <p id="endgame-msg" style="text-align: center;">You triggered a volatile core!</p>
+        <div class="modal-buttons">
+            <button class="btn" id="btn-inspect">Inspect Field</button>
+            <button class="btn" id="btn-play-again">Play Again</button>
+        </div>
+    </div>
+
+    <!-- WebXR & Engine Script -->
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+        import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+        import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
+
+        /* -------------------------------------------------------------
+           1. Audio Synthesizer (Web Audio API)
+        ------------------------------------------------------------- */
+        class SoundFX {
+            constructor() { this.ctx = null; }
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                }
+                if (this.ctx.state === 'suspended') this.ctx.resume();
+            }
+            playTone(freq, type = 'sine', duration = 0.1, gainVal = 0.1) {
+                try {
+                    this.init();
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = type;
+                    osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+                    gain.gain.setValueAtTime(gainVal, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + duration);
+                } catch (e) {}
+            }
+            click() { this.playTone(800, 'sine', 0.05, 0.07); }
+            reveal() { this.playTone(520, 'triangle', 0.12, 0.1); }
+            flag() { this.playTone(320, 'square', 0.08, 0.06); }
+            unflag() { this.playTone(240, 'square', 0.08, 0.06); }
+            win() {
+                [440, 554, 659, 880, 1108].forEach((f, i) => {
+                    setTimeout(() => this.playTone(f, 'sine', 0.25, 0.14), i * 110);
+                });
+            }
+            explode() {
+                try {
+                    this.init();
+                    const bufferSize = this.ctx.sampleRate * 0.45;
+                    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                    const data = buffer.getChannelData(0);
+                    for (let i = 0; i < bufferSize; i++) data[i] = Math.random() * 2 - 1;
+                    const noise = this.ctx.createBufferSource();
+                    noise.buffer = buffer;
+                    const filter = this.ctx.createBiquadFilter();
+                    filter.type = 'lowpass';
+                    filter.frequency.setValueAtTime(450, this.ctx.currentTime);
+                    filter.frequency.linearRampToValueAtTime(40, this.ctx.currentTime + 0.45);
+                    const gain = this.ctx.createGain();
+                    gain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.45);
+                    noise.connect(filter);
+                    filter.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    noise.start();
+                } catch (e) {}
+            }
+        }
+        const sfx = new SoundFX();
+
+        /* -------------------------------------------------------------
+           2. Visual Constants
+        ------------------------------------------------------------- */
+        const COLORS = {
+            NODE_UNREVEALED: 0x555555,
+            NODE_REVEALED: 0x0055ff,
+            NODE_HINT: 0xe5dc1a,
+            NODE_FLAG: 0xff1111,
+            NODE_MINE: 0xff0022,
+            LINK_DEFAULT: 0x555555,
+            LINK_SAFE: 0x0055ff,
+            LINK_MINE: 0xff1111,
+            RIGHT_REVEAL: 0x00a2ff,
+            LEFT_FLAG: 0xff2244
+        };
+
+        const NODE_RADIUS = 0.045;
+        const LINK_RADIUS = 0.006;
+
+        const TEXTURE_CACHE = new Map();
+        const MATERIAL_CACHE = new Map();
+
+        function getNumberTexture(number, color = '#ffffff') {
+            const key = `${number}_${color}`;
+            if (TEXTURE_CACHE.has(key)) return TEXTURE_CACHE.get(key);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = 128;
+            canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, 128, 128);
+            ctx.fillStyle = color;
+            ctx.font = 'bold 84px "Courier New", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 12;
+            ctx.fillText(number.toString(), 64, 64);
+
+            const tex = new THREE.CanvasTexture(canvas);
+            tex.minFilter = THREE.LinearFilter;
+            tex.generateMipmaps = false;
+            TEXTURE_CACHE.set(key, tex);
+            return tex;
+        }
+
+        function getNumberMaterial(number, color = '#ffffff') {
+            const key = `${number}_${color}`;
+            if (MATERIAL_CACHE.has(key)) return MATERIAL_CACHE.get(key);
+
+            const tex = getNumberTexture(number, color);
+            const mat = new THREE.SpriteMaterial({
+                map: tex,
+                depthTest: true,
+                depthWrite: false,
+                transparent: true
+            });
+            MATERIAL_CACHE.set(key, mat);
+            return mat;
+        }
+
+        function createNumberSprite(number, color = '#ffffff') {
+            const mat = getNumberMaterial(number, color);
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(NODE_RADIUS * 1.6, NODE_RADIUS * 1.6, 1);
+            return sprite;
+        }
+
+        /* -------------------------------------------------------------
+           3. Unified WebXR + 2D Engine
+        ------------------------------------------------------------- */
+        class MinesweeperApp {
+            constructor() {
+                this.nodes = [];
+                this.links = [];
+                this.particles = [];
+                this.inGame = true;
+                this.firstClick = true;
+                this.desktopFlagMode = false;
+                this.hoveredPalmButton = false;
+
+                this.isSpatialMenuOpen = true;
+
+                this.spriteUpdateTimer = 0;
+                this.needsSpriteUpdate = false;
+
+                this.genAlgorithm = 'tree';
+                this.currentDiff = 'easy';
+
+                const BASE_TREE_LINK    = 0.48;
+                const BASE_TREE_MIN_D   = 0.36;
+                const BASE_TREE_MAX_SEC = 0.69;
+                const BASE_POISSON_R    = 0.42;
+
+                this.difficulties = {
+                    easy: {
+                        mines: 5,
+                        tree: { maxNodes: 21, levels: 2, branches: 4, linkLength: BASE_TREE_LINK, minNodeDist: BASE_TREE_MIN_D, maxSecDist: BASE_TREE_MAX_SEC },
+                        poisson: { maxNodes: 21, radius: BASE_POISSON_R, boxSize: 1.65, connMult: 1.6 }
+                    },
+                    medium: {
+                        mines: 30,
+                        tree: { maxNodes: 85, levels: 4, branches: 3, linkLength: BASE_TREE_LINK, minNodeDist: BASE_TREE_MIN_D, maxSecDist: BASE_TREE_MAX_SEC },
+                        poisson: { maxNodes: 85, radius: BASE_POISSON_R, boxSize: 2.65, connMult: 1.6 }
+                    },
+                    hard: {
+                        mines: 45,
+                        tree: { maxNodes: 121, levels: 5, branches: 3, linkLength: BASE_TREE_LINK, minNodeDist: BASE_TREE_MIN_D, maxSecDist: BASE_TREE_MAX_SEC },
+                        poisson: { maxNodes: 121, radius: BASE_POISSON_R, boxSize: 3.00, connMult: 1.6 }
+                    },
+                    vhard: {
+                        mines: 130,
+                        tree: { maxNodes: 364, levels: 7, branches: 3, linkLength: BASE_TREE_LINK, minNodeDist: BASE_TREE_MIN_D, maxSecDist: BASE_TREE_MAX_SEC },
+                        poisson: { maxNodes: 364, radius: BASE_POISSON_R, boxSize: 4.25, connMult: 1.6 }
+                    },
+                    insane: {
+                        mines: 500,
+                        tree: { maxNodes: 1093, levels: 10, branches: 3, linkLength: BASE_TREE_LINK, minNodeDist: BASE_TREE_MIN_D, maxSecDist: BASE_TREE_MAX_SEC },
+                        poisson: { maxNodes: 1093, radius: BASE_POISSON_R, boxSize: 6.20, connMult: 1.6 }
+                    }
+                };
+
+                // Player Zero-G Locomotion & Weightless Inertia (Controllers + Hands)
+                this.activeGrabber = null; // can be a controller or a hand
+                this.previousGrabberPos = new THREE.Vector3();
+                this.playerLinearVelocity = new THREE.Vector3();
+                this.isPlayerDrifting = false;
+
+                this.vrUIPage = 'hud';
+                this.endGameData = { title: 'MISSION FAILED', message: 'Core detonated.', color: '#ff2222' };
+
+                this.camPos = new THREE.Vector3();
+                this.localDir = new THREE.Vector3();
+                this.tempVec = new THREE.Vector3();
+                this.tempQuat = new THREE.Quaternion();
+                this.tempNodePos = new THREE.Vector3();
+                this.workingMatrix = new THREE.Matrix4();
+                this.sharedSphereGeo = new THREE.SphereGeometry(NODE_RADIUS, 18, 18);
+
+                this.palmP1 = new THREE.Vector3();
+                this.palmP2 = new THREE.Vector3();
+                this.palmP3 = new THREE.Vector3();
+                this.palmNormal = new THREE.Vector3();
+                this.palmWorldPos = new THREE.Vector3();
+                this.controllerPalmDir = new THREE.Vector3();
+
+                // Locomotion scratch vectors
+                this.camForward = new THREE.Vector3();
+                this.camRight = new THREE.Vector3();
+                this.moveVector = new THREE.Vector3();
+                this.currentGrabberWorldPos = new THREE.Vector3();
+                this.jointTip = new THREE.Vector3();
+                this.jointBase = new THREE.Vector3();
+
+                this.initGraphics();
+                this.initWebXR();
+                this.initSpatialPanel();
+                this.initPalmMenuButton();
+                this.init2DUI();
+                this.initDesktopInteraction();
+                this.startNewGame();
+            }
+
+            initGraphics() {
+                this.canvas = document.getElementById('webgl-canvas');
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x020603);
+
+                this.cameraRig = new THREE.Group();
+                this.scene.add(this.cameraRig);
+
+                this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.05, 120);
+                this.camera.position.set(0, 1.45, 2.2);
+                this.cameraRig.add(this.camera);
+
+                this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance' });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+                this.renderer.xr.enabled = true;
+                document.body.appendChild(VRButton.createButton(this.renderer));
+
+                this.scene.add(new THREE.AmbientLight(0xffffff, 0.85));
+                const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
+                dirLight.position.set(6, 12, 8);
+                this.scene.add(dirLight);
+
+                this.worldAnchor = new THREE.Group();
+                this.worldAnchor.position.set(0, 1.25, -0.9);
+                this.scene.add(this.worldAnchor);
+
+                this.graphGroup = new THREE.Group();
+                this.worldAnchor.add(this.graphGroup);
+
+                window.addEventListener('resize', () => {
+                    this.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.camera.updateProjectionMatrix();
+                    this.renderer.setSize(window.innerWidth, window.innerHeight);
+                    this.needsSpriteUpdate = true;
+                });
+            }
+
+            initWebXR() {
+                this.controllerModelFactory = new XRControllerModelFactory();
+                this.handModelFactory = new XRHandModelFactory();
+                this.controllers = [];
+                this.controllerGrips = [];
+                this.hands = [];
+                this.raycaster = new THREE.Raycaster();
+
+                for (let i = 0; i < 2; i++) {
+                    const controller = this.renderer.xr.getController(i);
+                    this.cameraRig.add(controller);
+
+                    controller.userData.hoveredNode = null;
+                    controller.userData.hoveredVRButton = null;
+                    controller.userData.hoveredPalm = false;
+		    controller.userData.isGripping = false;
+
+                    const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
+                    const lineMat = new THREE.LineBasicMaterial({
+                        color: 0x00ff66,
+                        transparent: true,
+                        opacity: 0.85,
+                        depthTest: true,
+                        depthWrite: false
+                    });
+                    const laser = new THREE.Line(lineGeo, lineMat);
+                    laser.name = 'laser';
+                    laser.scale.z = 4.5;
+                    laser.renderOrder = 0;
+                    controller.add(laser);
+
+                    const reticleGeo = new THREE.RingGeometry(0.008, 0.015, 24);
+                    const reticleMat = new THREE.MeshBasicMaterial({
+                        color: 0x00ff66,
+                        side: THREE.DoubleSide,
+                        depthTest: true,
+                        depthWrite: false,
+                        transparent: true,
+                        opacity: 0.95
+                    });
+                    const reticle = new THREE.Mesh(reticleGeo, reticleMat);
+                    reticle.name = 'reticle';
+                    reticle.visible = false;
+                    reticle.renderOrder = 1;
+                    this.scene.add(reticle);
+                    controller.userData.reticle = reticle;
+
+                    const grip = this.renderer.xr.getControllerGrip(i);
+                    const cModel = this.controllerModelFactory.createControllerModel(grip);
+                    grip.add(cModel);
+                    this.cameraRig.add(grip);
+                    this.controllerGrips.push(grip);
+
+                    const hand = this.renderer.xr.getHand(i);
+                    hand.userData.isFist = false;
+                    hand.add(this.handModelFactory.createHandModel(hand, 'mesh'));
+                    this.cameraRig.add(hand);
+
+                    controller.addEventListener('connected', (e) => {
+                        controller.userData.gamepad = e.data.gamepad;
+                        controller.userData.handedness = e.data.handedness;
+                        this.applyHandTheming(controller, grip, e.data.handedness);
+                        this.updateControllerVisualHierarchy();
+                    });
+                    controller.addEventListener('disconnected', () => {
+                        controller.userData.gamepad = null;
+                        controller.userData.handedness = null;
+                        controller.userData.hoveredNode = null;
+                        controller.userData.hoveredVRButton = null;
+                        controller.userData.hoveredPalm = false;
+						controller.userData.isGripping = false;
+						if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = false;
+						if (hand.userData.moveGizmo) hand.userData.moveGizmo.visible = false;
+                        if (this.activeGrabber === controller) {
+                            this.onXRGrabEnd(controller);
+                        }
+                    });
+
+                    hand.addEventListener('connected', (e) => {
+                        hand.userData.handedness = e.data.handedness;
+                        this.applyHandModelTheming(hand, e.data.handedness);
+                        this.updateControllerVisualHierarchy();
+                    });
+                    hand.addEventListener('disconnected', () => {
+                        hand.userData.handedness = null;
+						if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = false;
+						if (hand.userData.moveGizmo) hand.userData.moveGizmo.visible = false;
+                        if (this.activeGrabber === hand) {
+                            this.onXRGrabEnd(hand);
+                        }
+                    });
+
+                    controller.addEventListener('selectstart', () => this.onXRTriggerDown(controller));
+					controller.addEventListener('squeezestart', () => {
+						controller.userData.isGripping = true;
+						if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = true;
+						this.onXRGrabStart(controller);
+					});
+
+					controller.addEventListener('squeezeend', () => {
+						controller.userData.isGripping = false;
+						if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = false;
+						this.onXRGrabEnd(controller);
+					});
+
+                    this.controllers.push(controller);
+                    this.hands.push(hand);
+                }
+            }
+
+	    createDoubleEndedGizmo(colorHex) {
+	        const group = new THREE.Group();
+	        const mat = new THREE.MeshBasicMaterial({
+	            color: colorHex,
+	            depthTest: false,
+	            depthWrite: false,
+	            transparent: true,
+	            opacity: 0.95
+	        });
+
+	        const totalLen = 0.08;
+	        const coneH = 0.015;
+	        const coneR = 0.0055;
+	        const shaftR = 0.0016;
+	        const shaftLen = totalLen - coneH * 2;
+
+	        const createAxis = () => {
+	            const axisGroup = new THREE.Group();
+        
+	            // Central shaft
+	            const shaftGeo = new THREE.CylinderGeometry(shaftR, shaftR, shaftLen, 8);
+	            const shaft = new THREE.Mesh(shaftGeo, mat);
+	            shaft.renderOrder = 9999;
+	            axisGroup.add(shaft);
+
+	            // Positive pointy end
+	            const coneGeo = new THREE.ConeGeometry(coneR, coneH, 12);
+	            const topCone = new THREE.Mesh(coneGeo, mat);
+	            topCone.position.y = shaftLen / 2 + coneH / 2;
+	            topCone.renderOrder = 9999;
+	            axisGroup.add(topCone);
+
+	            // Negative pointy end
+	            const bottomCone = new THREE.Mesh(coneGeo, mat);
+        	    bottomCone.position.y = -(shaftLen / 2 + coneH / 2);
+	            bottomCone.rotation.x = Math.PI;
+	            bottomCone.renderOrder = 9999;
+	            axisGroup.add(bottomCone);
+
+	            return axisGroup;
+	        };
+
+	        // Y-Axis (Vertical)
+	        const yAxis = createAxis();
+	        group.add(yAxis);
+
+	        // X-Axis (Horizontal) - perpendicular to Y
+	        const xAxis = createAxis();
+	        xAxis.rotation.z = Math.PI / 2;
+	        group.add(xAxis);
+
+	        // Z-Axis (Depth) - perpendicular to X and Y
+	        const zAxis = createAxis();
+	        zAxis.rotation.x = Math.PI / 2;
+	        group.add(zAxis);
+
+	        group.visible = false;
+	        group.renderOrder = 9999;
+	        return group;
+	    }
+
+			applyHandTheming(controller, grip, handedness) {
+				const isRight = handedness === 'right';
+				const colorHex = isRight ? COLORS.RIGHT_REVEAL : COLORS.LEFT_FLAG;
+
+				const laser = controller.getObjectByName('laser');
+				if (laser) laser.material.color.setHex(colorHex);
+
+				const reticle = controller.userData?.reticle;
+				if (reticle) reticle.material.color.setHex(colorHex);
+
+				// Create and attach the double-ended 3D move gizmo
+				if (controller.userData.moveGizmo) {
+					controller.remove(controller.userData.moveGizmo);
+				}
+				const gizmo = this.createDoubleEndedGizmo(colorHex);
+				gizmo.position.set(0, 0, -0.08); // Float in front of the controller
+				controller.add(gizmo);
+				controller.userData.moveGizmo = gizmo;
+
+				setTimeout(() => {
+					grip.traverse((child) => {
+						if (child.isMesh && child.material) {
+							child.material = child.material.clone();
+							child.material.color.setHex(colorHex);
+							if ('emissive' in child.material) {
+								child.material.emissive.setHex(colorHex);
+								child.material.emissiveIntensity = 0.2;
+							}
+						}
+					});
+				}, 300);
+			}
+
+			applyHandModelTheming(hand, handedness) {
+				const isRight = handedness === 'right';
+				const colorHex = isRight ? COLORS.RIGHT_REVEAL : COLORS.LEFT_FLAG;
+
+				// Create floating 3D move gizmo in scene for hand tracking
+				if (hand.userData.moveGizmo) {
+					this.scene.remove(hand.userData.moveGizmo);
+				}
+				const gizmo = this.createDoubleEndedGizmo(colorHex);
+				this.scene.add(gizmo);
+				hand.userData.moveGizmo = gizmo;
+
+				setTimeout(() => {
+					hand.traverse((child) => {
+						if (child.isMesh && child.material) {
+							child.material = child.material.clone();
+							child.material.color.setHex(colorHex);
+							if ('emissive' in child.material) {
+								child.material.emissive.setHex(colorHex);
+								child.material.emissiveIntensity = 0.3;
+							}
+						}
+					});
+				}, 300);
+			}
+
+            /* -------------------------------------------------------------
+               4. Spatial HUD & Wrist Menu
+            ------------------------------------------------------------- */
+            initSpatialPanel() {
+                this.hudCanvas = document.createElement('canvas');
+                this.hudCanvas.width = 1024;
+                this.hudCanvas.height = 420;
+                this.hudCtx = this.hudCanvas.getContext('2d');
+
+                this.hudTexture = new THREE.CanvasTexture(this.hudCanvas);
+                this.hudTexture.minFilter = THREE.LinearFilter;
+                this.hudTexture.generateMipmaps = false;
+
+                const hudGeo = new THREE.PlaneGeometry(0.70, 0.287);
+                const hudMat = new THREE.MeshBasicMaterial({ 
+                    map: this.hudTexture, 
+                    transparent: true, 
+                    side: THREE.DoubleSide,
+                    depthTest: false,
+                    depthWrite: false
+                });
+
+                this.hudMesh = new THREE.Mesh(hudGeo, hudMat);
+                this.hudMesh.renderOrder = 9999;
+                this.cameraRig.add(this.hudMesh);
+
+                this.virtualButtons = [];
+                this.renderSpatialUI();
+                this.updateControllerVisualHierarchy();
+            }
+
+            initPalmMenuButton() {
+                this.palmCanvas = document.createElement('canvas');
+                this.palmCanvas.width = 512;
+                this.palmCanvas.height = 160;
+                this.palmCtx = this.palmCanvas.getContext('2d');
+
+                this.palmTexture = new THREE.CanvasTexture(this.palmCanvas);
+                this.palmTexture.minFilter = THREE.LinearFilter;
+                this.palmTexture.generateMipmaps = false;
+
+                this.renderPalmButtonTexture(false);
+
+                const palmGeo = new THREE.PlaneGeometry(0.14, 0.046);
+                const palmMat = new THREE.MeshBasicMaterial({
+                    map: this.palmTexture,
+                    transparent: true,
+                    side: THREE.DoubleSide,
+                    depthTest: false,
+                    depthWrite: false
+                });
+
+                this.palmButtonMesh = new THREE.Mesh(palmGeo, palmMat);
+                this.palmButtonMesh.visible = false;
+                this.palmButtonMesh.renderOrder = 9999;
+                this.scene.add(this.palmButtonMesh);
+            }
+
+            renderPalmButtonTexture(isHovered) {
+                const ctx = this.palmCtx;
+                ctx.clearRect(0, 0, 512, 160);
+
+                ctx.fillStyle = isHovered ? 'rgba(0, 255, 102, 0.95)' : 'rgba(2, 20, 10, 0.92)';
+                ctx.strokeStyle = '#00ff66';
+                ctx.lineWidth = 8;
+                ctx.fillRect(8, 8, 496, 144);
+                ctx.strokeRect(8, 8, 496, 144);
+
+                ctx.fillStyle = isHovered ? '#000000' : '#00ff66';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = 'bold 36px monospace';
+                ctx.fillText('⚡ OPEN MENU ⚡', 256, 56);
+
+                ctx.font = '22px monospace';
+                ctx.fillStyle = isHovered ? '#111111' : '#88ffaa';
+                ctx.fillText('POKE OR TRIGGER', 256, 106);
+
+                this.palmTexture.needsUpdate = true;
+            }
+
+            registerVJButton(id, x, y, w, h, label, active = false, sub = '') {
+                this.virtualButtons.push({ id, x, y, w, h, label, active, sub });
+                const ctx = this.hudCtx;
+
+                if (id === 'close-hud-window') {
+                    ctx.fillStyle = 'rgba(60, 10, 10, 0.9)';
+                    ctx.strokeStyle = '#ff3344';
+                    ctx.lineWidth = 3;
+                    ctx.fillRect(x, y, w, h);
+                    ctx.strokeRect(x, y, w, h);
+                    ctx.fillStyle = '#ff4455';
+                    ctx.font = 'bold 26px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('✕', x + w / 2, y + h / 2);
+                    return;
+                }
+
+                ctx.fillStyle = active ? '#00ff66' : 'rgba(0, 20, 10, 0.9)';
+                ctx.strokeStyle = '#00ff66';
+                ctx.lineWidth = 3;
+                ctx.fillRect(x, y, w, h);
+                ctx.strokeRect(x, y, w, h);
+
+                ctx.fillStyle = active ? '#000000' : '#00ff66';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                if (sub) {
+                    ctx.font = 'bold 22px monospace';
+                    ctx.fillText(label, x + w / 2, y + h / 2 - 10);
+                    ctx.font = '15px monospace';
+                    ctx.fillStyle = active ? '#111111' : '#88ffaa';
+                    ctx.fillText(sub, x + w / 2, y + h / 2 + 14);
+                } else {
+                    ctx.font = 'bold 24px monospace';
+                    ctx.fillText(label, x + w / 2, y + h / 2);
+                }
+            }
+
+            renderSpatialUI() {
+                const ctx = this.hudCtx;
+                ctx.clearRect(0, 0, 1024, 420);
+
+                ctx.fillStyle = 'rgba(2, 14, 6, 0.94)';
+                ctx.fillRect(0, 0, 1024, 420);
+                ctx.strokeStyle = '#00ff66';
+                ctx.lineWidth = 6;
+                ctx.strokeRect(6, 6, 1012, 408);
+
+                this.virtualButtons = [];
+                this.registerVJButton('close-hud-window', 958, 14, 52, 44, '✕');
+
+                const curMines = this.difficulties[this.currentDiff].mines;
+                let flagged = 0, unrevealed = 0;
+                for (let n of this.nodes) {
+                    if (n.isFlagged) flagged++;
+                    if (!n.isRevealed) unrevealed++;
+                }
+                const leftMines = Math.max(0, curMines - flagged);
+
+                const diffLabels = { easy: 'Easy', medium: 'Medium', hard: 'Hard', vhard: 'V-Hard', insane: 'Insane' };
+
+                if (this.vrUIPage === 'hud') {
+                    ctx.fillStyle = '#00ff66';
+                    ctx.font = 'bold 25px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`MINES REMAINING: ${leftMines} | UNREVEALED NODES: ${unrevealed}`, 480, 42);
+
+                    const genLabels = { 'tree': 'Tree', 'poisson-uniform': 'P-Uniform', 'poisson-seq': 'P-Sequential', 'poisson-biased': 'P-Biased' };
+                    this.registerVJButton('open-diff', 40, 80, 450, 70, `DIFFICULTY: ${diffLabels[this.currentDiff].toUpperCase()}`, false);
+                    this.registerVJButton('open-gen', 534, 80, 450, 70, `GEN: ${genLabels[this.genAlgorithm]}`, false);
+                    this.registerVJButton('open-tut', 40, 175, 944, 70, '📖 CONTROLS & 3D PROTOCOL TUTORIAL', false);
+                    this.registerVJButton('new-game', 40, 270, 944, 90, '⚡ RE-GENERATE / NEW GAME ⚡', true);
+                } else if (this.vrUIPage === 'gen') {
+                    ctx.fillStyle = '#00ff66';
+                    ctx.font = 'bold 28px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('SELECT GENERATION ALGORITHM', 480, 42);
+
+                    this.registerVJButton('set-gen-tree', 40, 75, 450, 85, 'TREE BRANCHING', this.genAlgorithm === 'tree', 'Recursive Branching');
+                    this.registerVJButton('set-gen-p-uni', 534, 75, 450, 85, 'POISSON UNIFORM', this.genAlgorithm === 'poisson-uniform', 'Bridson 3D Uniform');
+                    this.registerVJButton('set-gen-p-seq', 40, 185, 450, 85, 'POISSON SEQUENTIAL', this.genAlgorithm === 'poisson-seq', 'Expanding Radial FIFO');
+                    this.registerVJButton('set-gen-p-bias', 534, 185, 450, 85, 'POISSON BIASED', this.genAlgorithm === 'poisson-biased', 'Frontier SwapBack Snake');
+                    this.registerVJButton('close-page', 40, 300, 944, 75, 'BACK TO DASHBOARD', false);
+                } else if (this.vrUIPage === 'diff') {
+                    ctx.fillStyle = '#00ff66';
+                    ctx.font = 'bold 28px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('SELECT DIFFICULTY PRESET', 480, 38);
+
+                    this.registerVJButton('set-diff-easy', 40, 60, 296, 80, 'EASY', this.currentDiff === 'easy', '5 Mines (21 Nodes)');
+                    this.registerVJButton('set-diff-medium', 364, 60, 296, 80, 'MEDIUM', this.currentDiff === 'medium', '30 Mines (85 Nodes)');
+                    this.registerVJButton('set-diff-hard', 688, 60, 296, 80, 'HARD', this.currentDiff === 'hard', '45 Mines (121 Nodes)');
+
+                    this.registerVJButton('set-diff-vhard', 40, 160, 450, 85, 'VERY HARD', this.currentDiff === 'vhard', '130 Mines (364 Nodes)');
+                    this.registerVJButton('set-diff-insane', 534, 160, 450, 85, 'INSANE', this.currentDiff === 'insane', '500 Mines (1,093 Nodes)');
+
+                    this.registerVJButton('close-page', 40, 275, 944, 75, 'BACK TO DASHBOARD', false);
+                } else if (this.vrUIPage === 'tut') {
+                    ctx.fillStyle = '#00ff66';
+                    ctx.font = 'bold 26px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('VR CONTROLS & PROTOCOL', 480, 36);
+
+                    ctx.font = 'bold 19px monospace';
+                    ctx.fillStyle = '#00c8ff';
+                    ctx.textAlign = 'left';
+                    ctx.fillText('• RIGHT CONTROLLER / HAND (BLUE):', 40, 70);
+                    ctx.font = '15px monospace';
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText('  Triggers laser / finger pokes REVEAL safe nodes.', 60, 92);
+
+                    ctx.font = 'bold 19px monospace';
+                    ctx.fillStyle = '#ff4466';
+                    ctx.fillText('• LEFT CONTROLLER / HAND (RED):', 40, 122);
+                    ctx.font = '15px monospace';
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText('  Triggers laser / finger pokes FLAG dangerous mine nodes.', 60, 144);
+
+                    ctx.font = '15px monospace';
+                    ctx.fillStyle = '#88ffaa';
+                    ctx.fillText('• THUMBSTICKS: Left Stick = Move/Strafe | Right Stick = Rotate Matrix.', 40, 180);
+                    ctx.fillText('• ZERO-G GRIP / FIST: Squeeze Grip OR form a Fist in empty space to grab space.', 40, 208);
+                    ctx.fillText('• PULL & PUSH: Drag yourself smoothly in any direction (X, Y, Z).', 40, 236);
+                    ctx.fillText('• RELEASE TO GLIDE: Open your hand / release grip to coast in weightless drift.', 40, 264);
+                    ctx.fillText('• BRAKE: Make a fist or squeeze grip again at any time to instantly brake to a stop.', 40, 292);
+
+                    this.registerVJButton('close-page', 40, 325, 944, 60, 'RETURN TO SYSTEM', true);
+                } else if (this.vrUIPage === 'gameover') {
+                    ctx.fillStyle = this.endGameData.color;
+                    ctx.font = 'bold 36px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(this.endGameData.title, 480, 70);
+
+                    ctx.font = '24px monospace';
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillText(this.endGameData.message, 512, 135);
+
+                    this.registerVJButton('close-page', 60, 210, 420, 120, 'INSPECT BOARD', false);
+                    this.registerVJButton('new-game', 544, 210, 420, 120, 'PLAY AGAIN', true);
+                }
+
+                this.hudTexture.needsUpdate = true;
+            }
+
+            getHeadPoseInRig(outPos, outQuat, outDir) {
+                if (this.renderer.xr && this.renderer.xr.isPresenting) {
+                    const xrCam = this.renderer.xr.getCamera();
+                    xrCam.matrix.decompose(outPos, outQuat, this.tempVec);
+                    if (outDir) {
+                        outDir.set(0, 0, -1).applyQuaternion(outQuat);
+                    }
+                } else {
+                    outPos.copy(this.camera.position);
+                    outQuat.copy(this.camera.quaternion);
+                    if (outDir) {
+                        outDir.set(0, 0, -1).applyQuaternion(outQuat);
+                    }
+                }
+            }
+
+            updateSpatialHUDPosition(snap = false) {
+                if (!this.isSpatialMenuOpen || !this.hudMesh || !this.hudMesh.visible) return;
+
+                const headPos = new THREE.Vector3();
+                const headQuat = new THREE.Quaternion();
+                const headDir = new THREE.Vector3();
+
+                this.getHeadPoseInRig(headPos, headQuat, headDir);
+
+                const targetPos = headPos.clone().addScaledVector(headDir, 0.85);
+
+                if (snap) {
+                    this.hudMesh.position.copy(targetPos);
+                    this.hudMesh.quaternion.copy(headQuat);
+                    return;
+                }
+
+                this.hudMesh.position.lerp(targetPos, 0.14);
+                this.hudMesh.quaternion.slerp(headQuat, 0.14);
+            }
+
+            updateControllerVisualHierarchy() {
+                const overlayHUD = this.isSpatialMenuOpen && this.hudMesh && this.hudMesh.visible;
+                const targetRenderOrder = overlayHUD ? 10000 : 0;
+                const targetDepthTest = !overlayHUD;
+
+                const applyVisualProps = (obj, orderOffset = 0) => {
+                    if (!obj) return;
+                    obj.traverse((child) => {
+                        if (child.isMesh || child.isLine) {
+                            child.renderOrder = targetRenderOrder + orderOffset;
+                            if (child.material) {
+                                child.material.depthTest = targetDepthTest;
+                                child.material.needsUpdate = true;
+                            }
+                        }
+                    });
+                };
+
+                for (let grip of this.controllerGrips) applyVisualProps(grip);
+                for (let hand of this.hands) applyVisualProps(hand);
+                
+                for (let controller of this.controllers) {
+                    applyVisualProps(controller);
+                    if (controller.userData?.reticle) {
+                        applyVisualProps(controller.userData.reticle, 1);
+                    }
+                }
+            }
+
+            openSpatialMenu() {
+                sfx.click();
+                this.isSpatialMenuOpen = true;
+                this.hudMesh.visible = true;
+                if (this.palmButtonMesh) this.palmButtonMesh.visible = false;
+                
+                this.updateSpatialHUDPosition(true);
+
+                this.updateControllerVisualHierarchy();
+                this.renderSpatialUI();
+                this.update2DHUD();
+            }
+
+            closeSpatialMenu() {
+                sfx.click();
+                this.isSpatialMenuOpen = false;
+                this.hudMesh.visible = false;
+                
+                for (let controller of this.controllers) {
+                    if (controller.userData?.reticle) {
+                        controller.userData.reticle.visible = false;
+                    }
+                    controller.userData.hoveredVRButton = null;
+                    controller.userData.hoveredPalm = false;
+                    controller.userData.hoveredNode = null;
+                }
+
+                this.updateControllerVisualHierarchy();
+                this.update2DHUD();
+            }
+
+            handleSpatialUIPress(buttonId) {
+                if (buttonId === 'close-hud-window') {
+                    this.closeSpatialMenu();
+                    return;
+                }
+
+                sfx.click();
+                if (buttonId === 'open-gen') {
+                    this.vrUIPage = 'gen';
+                } else if (buttonId === 'open-diff') {
+                    this.vrUIPage = 'diff';
+                } else if (buttonId === 'open-tut') {
+                    this.vrUIPage = 'tut';
+                } else if (buttonId === 'close-page') {
+                    this.vrUIPage = 'hud';
+                } else if (buttonId === 'new-game') {
+                    this.vrUIPage = 'hud';
+                    this.startNewGame();
+                } else if (buttonId.startsWith('set-gen-')) {
+                    const map = {
+                        'set-gen-tree': 'tree',
+                        'set-gen-p-uni': 'poisson-uniform',
+                        'set-gen-p-seq': 'poisson-seq',
+                        'set-gen-p-bias': 'poisson-biased'
+                    };
+                    this.genAlgorithm = map[buttonId];
+                    this.vrUIPage = 'hud';
+                    this.startNewGame();
+                } else if (buttonId.startsWith('set-diff-')) {
+                    this.currentDiff = buttonId.replace('set-diff-', '');
+                    this.vrUIPage = 'hud';
+                    this.startNewGame();
+                }
+                this.renderSpatialUI();
+                this.update2DHUD();
+            }
+
+            /* -------------------------------------------------------------
+               5. Graph Building & Outside Framing
+            ------------------------------------------------------------- */
+            clearGraph() {
+                while (this.graphGroup.children.length > 0) {
+                    const obj = this.graphGroup.children[0];
+                    this.graphGroup.remove(obj);
+                    if (obj.geometry && obj.geometry !== this.sharedSphereGeo) obj.geometry.dispose();
+                }
+                this.nodes = [];
+                this.links = [];
+            }
+
+            ensureCompleteConnectivity() {
+                if (this.nodes.length <= 1) return;
+
+                const getComponents = () => {
+                    const visited = new Uint8Array(this.nodes.length);
+                    const comps = [];
+                    for (let i = 0; i < this.nodes.length; i++) {
+                        if (visited[i]) continue;
+                        const comp = [];
+                        const q = [i];
+                        visited[i] = 1;
+                        while (q.length > 0) {
+                            const cur = q.shift();
+                            comp.push(cur);
+                            for (let nb of this.nodes[cur].neighbors) {
+                                if (!visited[nb]) {
+                                    visited[nb] = 1;
+                                    q.push(nb);
+                                }
+                            }
+                        }
+                        comps.push(comp);
+                    }
+                    return comps;
+                };
+
+                let components = getComponents();
+                while (components.length > 1) {
+                    components.sort((a, b) => b.length - a.length);
+                    const mainComp = components[0];
+                    const island = components[1];
+
+                    let bestDistSq = Infinity;
+                    let from = -1, to = -1;
+
+                    for (let islId of island) {
+                        const pIsland = this.nodes[islId].pos;
+                        for (let mainId of mainComp) {
+                            const dSq = pIsland.distanceToSquared(this.nodes[mainId].pos);
+                            if (dSq < bestDistSq) {
+                                bestDistSq = dSq;
+                                from = islId;
+                                to = mainId;
+                            }
+                        }
+                    }
+
+                    if (from !== -1 && to !== -1) {
+                        this.addLink(from, to);
+                    }
+                    components = getComponents();
+                }
+            }
+
+            generateTreeGraph() {
+                this.clearGraph();
+                const cfg = this.difficulties[this.currentDiff].tree;
+
+                this.addNode(new THREE.Vector3(0, 0, 0));
+                const queue = [{ id: 0, level: 0 }];
+
+                while (queue.length > 0 && this.nodes.length < cfg.maxNodes) {
+                    const cur = queue.shift();
+                    if (cur.level >= cfg.levels) continue;
+
+                    for (let b = 0; b < cfg.branches; b++) {
+                        if (this.nodes.length >= cfg.maxNodes) break;
+
+                        let found = false;
+                        const cand = new THREE.Vector3();
+                        for (let a = 0; a < 35; a++) {
+                            const dir = new THREE.Vector3(
+                                (Math.random() - 0.5) * 2,
+                                (Math.random() - 0.5) * 2,
+                                (Math.random() - 0.5) * 2
+                            ).normalize();
+
+                            cand.copy(this.nodes[cur.id].pos).addScaledVector(dir, cfg.linkLength);
+
+                            let tooClose = false;
+                            for (let n of this.nodes) {
+                                if (cand.distanceTo(n.pos) < cfg.minNodeDist) {
+                                    tooClose = true;
+                                    break;
+                                }
+                            }
+                            if (!tooClose) {
+                                found = true;
+                                break;
+                            }
+                        }
+
+                        if (found) {
+                            const newId = this.addNode(cand);
+                            this.addLink(cur.id, newId);
+                            queue.push({ id: newId, level: cur.level + 1 });
+                        }
+                    }
+                }
+
+                for (let i = 0; i < this.nodes.length; i++) {
+                    for (let j = i + 1; j < this.nodes.length; j++) {
+                        const d = this.nodes[i].pos.distanceTo(this.nodes[j].pos);
+                        if (d <= cfg.maxSecDist && d >= cfg.minNodeDist * 0.8) {
+                            if (this.nodes[i].neighbors.length < 5 && this.nodes[j].neighbors.length < 5) {
+                                if (!this.nodes[i].neighbors.includes(j)) {
+                                    this.addLink(i, j);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                this.ensureCompleteConnectivity();
+            }
+
+            generatePoissonGraph(variant) {
+                this.clearGraph();
+                const cfg = this.difficulties[this.currentDiff].poisson;
+                const r = cfg.radius;
+                const sqRadius = r * r;
+                const maxPoints = cfg.maxNodes;
+                const boxSize = cfg.boxSize;
+                const halfBox = boxSize / 2;
+                const k = 30;
+
+                const cellSize = r / Math.sqrt(3);
+                const gridDim = Math.ceil(boxSize / cellSize);
+                const grid = new Int32Array(gridDim * gridDim * gridDim).fill(-1);
+                const getGridIdx = (gx, gy, gz) => (gx * gridDim + gy) * gridDim + gz;
+
+                const points = [];
+                const spawnPoints = [];
+
+                const firstPt = new THREE.Vector3(0, 0, 0);
+                points.push(firstPt);
+                spawnPoints.push(firstPt);
+
+                const gX = Math.floor((firstPt.x + halfBox) / cellSize);
+                const gY = Math.floor((firstPt.y + halfBox) / cellSize);
+                const gZ = Math.floor((firstPt.z + halfBox) / cellSize);
+                grid[getGridIdx(gX, gY, gZ)] = 0;
+
+                const isValid = (candidate) => {
+                    if (candidate.x < -halfBox || candidate.x >= halfBox ||
+                        candidate.y < -halfBox || candidate.y >= halfBox ||
+                        candidate.z < -halfBox || candidate.z >= halfBox) return false;
+
+                    const cx = Math.floor((candidate.x + halfBox) / cellSize);
+                    const cy = Math.floor((candidate.y + halfBox) / cellSize);
+                    const cz = Math.floor((candidate.z + halfBox) / cellSize);
+
+                    const sx = Math.max(0, cx - 2), ex = Math.min(gridDim - 1, cx + 2);
+                    const sy = Math.max(0, cy - 2), ey = Math.min(gridDim - 1, cy + 2);
+                    const sz = Math.max(0, cz - 2), ez = Math.min(gridDim - 1, cz + 2);
+
+                    for (let x = sx; x <= ex; x++) {
+                        for (let y = sy; y <= ey; y++) {
+                            for (let z = sz; z <= ez; z++) {
+                                const ptIdx = grid[getGridIdx(x, y, z)];
+                                if (ptIdx !== -1) {
+                                    if (candidate.distanceToSquared(points[ptIdx]) < sqRadius) return false;
+                                }
+                            }
+                        }
+                    }
+                    return true;
+                };
+
+                let lastActive = 0;
+
+                while (points.length < maxPoints) {
+                    let spawnCentre, spawnIdx = -1;
+                    if (variant === 'poisson-uniform') {
+                        if (spawnPoints.length === 0) break;
+                        spawnIdx = Math.floor(Math.random() * spawnPoints.length);
+                        spawnCentre = spawnPoints[spawnIdx];
+                    } else if (variant === 'poisson-seq') {
+                        if (lastActive >= points.length) break;
+                        spawnCentre = points[lastActive];
+                    } else if (variant === 'poisson-biased') {
+                        if (spawnPoints.length === 0) break;
+                        spawnCentre = spawnPoints[0];
+                    }
+
+                    let accepted = false;
+                    for (let i = 0; i < k; i++) {
+                        const theta = Math.random() * Math.PI * 2;
+                        const phi = Math.acos(2 * Math.random() - 1);
+                        const radiusOffset = r + Math.random() * r;
+
+                        const candidate = new THREE.Vector3(
+                            spawnCentre.x + radiusOffset * Math.sin(phi) * Math.cos(theta),
+                            spawnCentre.y + radiusOffset * Math.sin(phi) * Math.sin(theta),
+                            spawnCentre.z + radiusOffset * Math.cos(phi)
+                        );
+
+                        if (isValid(candidate)) {
+                            const newIdx = points.length;
+                            points.push(candidate);
+                            spawnPoints.push(candidate);
+
+                            const cx = Math.floor((candidate.x + halfBox) / cellSize);
+                            const cy = Math.floor((candidate.y + halfBox) / cellSize);
+                            const cz = Math.floor((candidate.z + halfBox) / cellSize);
+                            grid[getGridIdx(cx, cy, cz)] = newIdx;
+
+                            accepted = true;
+                            if (points.length >= maxPoints) break;
+                        }
+                    }
+
+                    if (!accepted) {
+                        if (variant === 'poisson-uniform') {
+                            spawnPoints.splice(spawnIdx, 1);
+                        } else if (variant === 'poisson-seq') {
+                            lastActive++;
+                        } else if (variant === 'poisson-biased') {
+                            const last = spawnPoints.pop();
+                            if (spawnPoints.length > 0) spawnPoints[0] = last;
+                        }
+                    }
+                }
+
+                points.forEach(pt => this.addNode(pt));
+
+                const connRad = r * cfg.connMult;
+                for (let i = 0; i < this.nodes.length; i++) {
+                    for (let j = i + 1; j < this.nodes.length; j++) {
+                        if (this.nodes[i].pos.distanceTo(this.nodes[j].pos) <= connRad) {
+                            if (this.nodes[i].neighbors.length < 5 && this.nodes[j].neighbors.length < 5) {
+                                this.addLink(i, j);
+                            }
+                        }
+                    }
+                }
+
+                this.ensureCompleteConnectivity();
+            }
+
+            frameGridInView() {
+                if (this.nodes.length === 0) return;
+
+                this.worldAnchor.position.set(0, 1.25, -0.9);
+                this.worldAnchor.rotation.set(0, 0, 0);
+                this.worldAnchor.scale.set(1, 1, 1);
+                this.graphGroup.rotation.set(0, 0, 0);
+
+                this.playerLinearVelocity.set(0, 0, 0);
+                this.isPlayerDrifting = false;
+                this.activeGrabber = null;
+
+                this.cameraRig.position.set(0, 0, 0);
+
+                const box = new THREE.Box3();
+                this.nodes.forEach(n => box.expandByPoint(n.pos));
+                const sphere = new THREE.Sphere();
+                box.getBoundingSphere(sphere);
+
+                const radius = Math.max(0.6, sphere.radius);
+                const fov = (this.camera.fov * Math.PI) / 180;
+                const fitDistance = (radius / Math.sin(fov / 2)) * 1.15;
+
+                this.camera.position.set(0, 1.35, fitDistance + 0.3);
+                if (this.controls) {
+                    this.controls.target.set(0, 1.25, 0);
+                    this.controls.update();
+                }
+
+                if (this.renderer.xr.isPresenting) {
+                    this.worldAnchor.position.set(0, 1.25, -(fitDistance * 0.85));
+                }
+            }
+
+            buildGraph() {
+                if (this.genAlgorithm === 'tree') {
+                    this.generateTreeGraph();
+                } else {
+                    this.generatePoissonGraph(this.genAlgorithm);
+                }
+                this.frameGridInView();
+            }
+
+            addNode(pos) {
+                const id = this.nodes.length;
+                const mat = new THREE.MeshStandardMaterial({
+                    color: COLORS.NODE_UNREVEALED,
+                    roughness: 0.35,
+                    metalness: 0.2
+                });
+                const mesh = new THREE.Mesh(this.sharedSphereGeo, mat);
+                mesh.position.copy(pos);
+                mesh.userData = { nodeId: id };
+                this.graphGroup.add(mesh);
+
+                this.nodes.push({
+                    id, pos: pos.clone(), mesh, sprite: null, neighbors: [], links: [],
+                    isMine: false, isRevealed: false, isFlagged: false, isHinted: false, adjMines: 0
+                });
+                return id;
+            }
+
+            addLink(nodeAId, nodeBId) {
+                if (this.nodes[nodeAId].neighbors.includes(nodeBId)) return;
+                const p1 = this.nodes[nodeAId].pos;
+                const p2 = this.nodes[nodeBId].pos;
+                const dir = new THREE.Vector3().subVectors(p2, p1);
+                const len = dir.length();
+
+                const geom = new THREE.CylinderGeometry(LINK_RADIUS, LINK_RADIUS, len, 6);
+                geom.translate(0, len / 2, 0);
+                geom.rotateX(Math.PI / 2);
+
+                const mesh = new THREE.Mesh(geom, new THREE.MeshStandardMaterial({ color: COLORS.LINK_DEFAULT, roughness: 0.5 }));
+                mesh.position.copy(p1);
+                mesh.lookAt(p2);
+                this.graphGroup.add(mesh);
+
+                const linkId = this.links.length;
+                this.links.push({ id: linkId, a: nodeAId, b: nodeBId, mesh });
+                this.nodes[nodeAId].neighbors.push(nodeBId);
+                this.nodes[nodeAId].links.push(linkId);
+                this.nodes[nodeBId].neighbors.push(nodeAId);
+                this.nodes[nodeBId].links.push(linkId);
+            }
+
+            /* -------------------------------------------------------------
+               6. Gameplay Engine & Board Resolution
+            ------------------------------------------------------------- */
+            plantMines(safeId) {
+                const cfg = this.difficulties[this.currentDiff];
+                const maxPossibleMines = Math.max(1, this.nodes.length - 1 - this.nodes[safeId].neighbors.length);
+                const totalMines = Math.min(cfg.mines, maxPossibleMines);
+                let planted = 0;
+
+                while (planted < totalMines) {
+                    const idx = Math.floor(Math.random() * this.nodes.length);
+                    if (idx === safeId || this.nodes[safeId].neighbors.includes(idx)) continue;
+                    if (!this.nodes[idx].isMine) {
+                        this.nodes[idx].isMine = true;
+                        planted++;
+                    }
+                }
+
+                for (let n of this.nodes) {
+                    n.adjMines = n.neighbors.filter(nb => this.nodes[nb].isMine).length;
+                }
+            }
+
+            revealNode(id) {
+                const node = this.nodes[id];
+                if (!this.inGame || node.isRevealed || node.isFlagged) return;
+
+                if (this.firstClick) {
+                    this.firstClick = false;
+                    this.plantMines(id);
+                }
+
+                if (node.isMine) {
+                    this.triggerGameOver(id);
+                    return;
+                }
+
+                node.isRevealed = true;
+                node.mesh.material.color.setHex(COLORS.NODE_REVEALED);
+                sfx.reveal();
+
+                this.attachNumberSprite(node, '#ffffff');
+                this.updateLinksColor();
+
+                for (let nbId of node.neighbors) {
+                    const nb = this.nodes[nbId];
+                    if (!nb.isRevealed && !nb.isFlagged) {
+                        nb.isHinted = true;
+                        nb.mesh.material.color.setHex(COLORS.NODE_HINT);
+                        this.attachNumberSprite(nb, '#000000');
+                    }
+                }
+
+                if (node.adjMines === 0) {
+                    for (let nb of node.neighbors) {
+                        if (!this.nodes[nb].isRevealed) this.revealNode(nb);
+                    }
+                }
+
+                this.update2DHUD();
+                this.renderSpatialUI();
+                this.checkWinCondition();
+            }
+
+            toggleFlag(id) {
+                const node = this.nodes[id];
+                if (!this.inGame || node.isRevealed) return;
+
+                node.isFlagged = !node.isFlagged;
+                if (node.isFlagged) {
+                    sfx.flag();
+                    node.mesh.material.color.setHex(COLORS.NODE_FLAG);
+                    if (node.sprite) node.sprite.visible = false;
+                } else {
+                    sfx.unflag();
+                    node.mesh.material.color.setHex(node.isHinted ? COLORS.NODE_HINT : COLORS.NODE_UNREVEALED);
+                    if (node.sprite) {
+                        node.sprite.visible = true;
+                        this.orientSprite(node);
+                    }
+                }
+
+                this.updateLinksColor();
+                this.update2DHUD();
+                this.renderSpatialUI();
+                this.checkWinCondition();
+            }
+
+            attachNumberSprite(node, color) {
+                if (node.sprite) {
+                    node.mesh.remove(node.sprite);
+                    node.sprite = null;
+                }
+                const sprite = createNumberSprite(node.adjMines, color);
+                node.mesh.add(sprite);
+                node.sprite = sprite;
+                this.orientSprite(node);
+            }
+
+            orientSprite(node) {
+                if (!node.sprite || !node.sprite.visible) return;
+
+                if (this.renderer.xr && this.renderer.xr.isPresenting) {
+                    this.cameraRig.updateMatrixWorld(true);
+                    const xrCam = this.renderer.xr.getCamera();
+                    this.camPos.setFromMatrixPosition(xrCam.matrix);
+                    this.camPos.applyMatrix4(this.cameraRig.matrixWorld);
+                } else {
+                    this.camera.getWorldPosition(this.camPos);
+                }
+
+                this.localDir.copy(this.camPos);
+                node.mesh.worldToLocal(this.localDir);
+
+                if (this.localDir.lengthSq() > 0.0001) {
+                    this.localDir.normalize().multiplyScalar(NODE_RADIUS + 0.006);
+                    node.sprite.position.copy(this.localDir);
+                }
+            }
+
+            updateAllSprites() {
+                for (let i = 0; i < this.nodes.length; i++) {
+                    this.orientSprite(this.nodes[i]);
+                }
+            }
+
+            updateLinksColor() {
+                for (let link of this.links) {
+                    const na = this.nodes[link.a];
+                    const nb = this.nodes[link.b];
+                    if (na.isFlagged || nb.isFlagged) {
+                        link.mesh.material.color.setHex(COLORS.LINK_MINE);
+                    } else if (na.isRevealed && nb.isRevealed) {
+                        link.mesh.material.color.setHex(COLORS.LINK_SAFE);
+                    } else {
+                        link.mesh.material.color.setHex(COLORS.LINK_DEFAULT);
+                    }
+                }
+            }
+
+            checkWinCondition() {
+                const cfg = this.difficulties[this.currentDiff];
+                let revealedCount = 0, flaggedCorrect = 0;
+
+                for (let n of this.nodes) {
+                    if (n.isRevealed && !n.isMine) revealedCount++;
+                    if (n.isFlagged && n.isMine) flaggedCorrect++;
+                }
+
+                const safeTotal = this.nodes.length - cfg.mines;
+                if (revealedCount >= safeTotal || flaggedCorrect === cfg.mines) {
+                    this.inGame = false;
+                    sfx.win();
+
+                    this.endGameData = { title: 'MISSION VICTORY', message: 'All cybernetic cores secured!', color: '#00ff66' };
+                    document.getElementById('endgame-title').textContent = this.endGameData.title;
+                    document.getElementById('endgame-title').style.color = this.endGameData.color;
+                    document.getElementById('endgame-msg').textContent = this.endGameData.message;
+                    document.getElementById('modal-gameover').style.display = 'flex';
+
+                    this.vrUIPage = 'gameover';
+                    this.openSpatialMenu();
+                }
+            }
+
+            triggerGameOver(detonatedId) {
+                this.inGame = false;
+                sfx.explode();
+
+                const detonatedNode = this.nodes[detonatedId];
+                detonatedNode.mesh.material.color.setHex(COLORS.NODE_MINE);
+                this.createExplosionParticles(detonatedNode.mesh.getWorldPosition(new THREE.Vector3()), 0xff2200);
+
+                const otherMines = this.nodes.filter(n => n.isMine && n.id !== detonatedId);
+                const maxStagedExplosions = Math.min(16, otherMines.length);
+                const delay = 100;
+
+                for (let i = 0; i < maxStagedExplosions; i++) {
+                    const n = otherMines[i];
+                    setTimeout(() => {
+                        n.mesh.material.color.setHex(COLORS.NODE_MINE);
+                        this.createExplosionParticles(n.mesh.getWorldPosition(new THREE.Vector3()), 0xff0044);
+                        sfx.playTone(140 + Math.random() * 200, 'sawtooth', 0.08, 0.08);
+                    }, (i + 1) * delay);
+                }
+
+                const totalWait = (maxStagedExplosions + 1) * delay + 250;
+                setTimeout(() => {
+                    this.revealFullBoard();
+                    this.endGameData = { title: 'MISSION FAILED', message: 'Mine core detonation triggered!', color: '#ff2222' };
+                    document.getElementById('endgame-title').textContent = this.endGameData.title;
+                    document.getElementById('endgame-title').style.color = this.endGameData.color;
+                    document.getElementById('endgame-msg').textContent = this.endGameData.message;
+                    document.getElementById('modal-gameover').style.display = 'flex';
+
+                    this.vrUIPage = 'gameover';
+                    this.openSpatialMenu();
+                }, totalWait);
+            }
+
+            revealFullBoard() {
+                for (let n of this.nodes) {
+                    if (n.isMine) {
+                        n.mesh.material.color.setHex(COLORS.NODE_MINE);
+                    } else {
+                        n.mesh.material.color.setHex(COLORS.NODE_REVEALED);
+                        this.attachNumberSprite(n, '#ffffff');
+                    }
+                }
+                for (let l of this.links) {
+                    const na = this.nodes[l.a], nb = this.nodes[l.b];
+                    if (na.isMine || nb.isMine) {
+                        l.mesh.material.color.setHex(COLORS.LINK_MINE);
+                    } else {
+                        l.mesh.material.color.setHex(COLORS.LINK_SAFE);
+                    }
+                }
+                this.needsSpriteUpdate = true;
+            }
+
+            createExplosionParticles(worldPos, hex) {
+                const count = 35;
+                const pGeo = new THREE.BufferGeometry();
+                const pos = new Float32Array(count * 3);
+                const vels = [];
+
+                for (let i = 0; i < count; i++) {
+                    pos[i * 3] = worldPos.x;
+                    pos[i * 3 + 1] = worldPos.y;
+                    pos[i * 3 + 2] = worldPos.z;
+                    vels.push(new THREE.Vector3(
+                        (Math.random() - 0.5) * 2.6,
+                        (Math.random() - 0.5) * 2.6,
+                        (Math.random() - 0.5) * 2.6
+                    ));
+                }
+
+                pGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                const pMat = new THREE.PointsMaterial({ color: hex, size: 0.035, transparent: true, opacity: 1 });
+                const pSys = new THREE.Points(pGeo, pMat);
+                this.scene.add(pSys);
+                this.particles.push({ mesh: pSys, vels, life: 1.0 });
+            }
+
+            updateParticles(dt) {
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    const p = this.particles[i];
+                    p.life -= dt * 1.8;
+                    p.mesh.material.opacity = p.life;
+                    const posAttr = p.mesh.geometry.attributes.position;
+                    for (let j = 0; j < p.vels.length; j++) {
+                        posAttr.setXYZ(
+                            j,
+                            posAttr.getX(j) + p.vels[j].x * dt,
+                            posAttr.getY(j) + p.vels[j].y * dt,
+                            posAttr.getZ(j) + p.vels[j].z * dt
+                        );
+                    }
+                    posAttr.needsUpdate = true;
+                    if (p.life <= 0) {
+                        this.scene.remove(p.mesh);
+                        p.mesh.geometry.dispose();
+                        p.mesh.material.dispose();
+                        this.particles.splice(i, 1);
+                    }
+                }
+            }
+
+            /* -------------------------------------------------------------
+               7. Interaction: WebXR + Desktop
+            ------------------------------------------------------------- */
+            triggerHaptic(controller, intensity = 0.5, duration = 30) {
+                const gamepad = controller.userData?.gamepad;
+                try {
+                    if (gamepad?.hapticActuators?.[0]?.pulse) gamepad.hapticActuators[0].pulse(intensity, duration);
+                } catch (e) {}
+            }
+
+            onXRTriggerDown(controller) {
+                this.triggerHaptic(controller, 0.7, 40);
+
+                if (controller.userData.hoveredPalm) {
+                    this.openSpatialMenu();
+                    return;
+                }
+                if (controller.userData.hoveredVRButton) {
+                    this.handleSpatialUIPress(controller.userData.hoveredVRButton.id);
+                    return;
+                }
+                if (controller.userData.hoveredNode) {
+                    const isRightHand = controller.userData?.handedness === 'right';
+                    if (isRightHand) {
+                        this.revealNode(controller.userData.hoveredNode.id);
+                    } else {
+                        this.toggleFlag(controller.userData.hoveredNode.id);
+                    }
+                }
+            }
+
+            getGrabberWorldPosition(grabber, outPos) {
+                if (grabber.joints && grabber.joints['wrist']) {
+                    grabber.joints['wrist'].getWorldPosition(outPos);
+                } else {
+                    grabber.getWorldPosition(outPos);
+                }
+            }
+
+            onXRGrabStart(grabber) {
+                this.playerLinearVelocity.set(0, 0, 0);
+                this.isPlayerDrifting = false;
+
+                this.activeGrabber = grabber;
+                this.getGrabberWorldPosition(grabber, this.previousGrabberPos);
+            }
+
+            onXRGrabEnd(grabber) {
+                if (this.activeGrabber === grabber) {
+                    this.activeGrabber = null;
+                    if (this.playerLinearVelocity.length() > 0.05) {
+                        this.isPlayerDrifting = true;
+                    } else {
+                        this.playerLinearVelocity.set(0, 0, 0);
+                        this.isPlayerDrifting = false;
+                    }
+                }
+            }
+
+			isThumbAtRightAngleFromWrist(hand) {
+				if (!hand.joints) return false;
+
+				const wrist = hand.joints['wrist'];
+				const middleKnuckle = hand.joints['middle-finger-phalanx-proximal'];
+				const thumbBase = hand.joints['thumb-metacarpal'] || hand.joints['thumb-phalanx-proximal'];
+				const thumbTip = hand.joints['thumb-tip'];
+
+				if (!wrist || !middleKnuckle || !thumbBase || !thumbTip) return false;
+
+				// 1. Vector pointing straight along the hand from the wrist to the middle knuckle
+				wrist.getWorldPosition(this.jointBase);
+				middleKnuckle.getWorldPosition(this.tempVec);
+				const wristAxis = new THREE.Vector3().subVectors(this.tempVec, this.jointBase).normalize();
+
+				// 2. Vector pointing along the thumb from base to tip
+				thumbBase.getWorldPosition(this.jointBase);
+				thumbTip.getWorldPosition(this.jointTip);
+				const thumbDir = new THREE.Vector3().subVectors(this.jointTip, this.jointBase).normalize();
+
+				// 3. Compute the angle between wrist axis and thumb
+				const dot = wristAxis.dot(thumbDir);
+				const angleRad = Math.acos(THREE.MathUtils.clamp(dot, -1, 1));
+				const angleDeg = THREE.MathUtils.radToDeg(angleRad);
+
+				// 4. Must be pointing at a right angle (70° - 110°) away from the wrist axis
+				const isRightAngle = angleDeg >= 70 && angleDeg <= 110;
+
+				// 5. Ensure the thumb itself is extended (not collapsed)
+				const thumbExtendedLength = this.jointTip.distanceTo(this.jointBase);
+				const isThumbStretched = thumbExtendedLength > 0.042; // > 4.2 cm
+
+				return isRightAngle && isThumbStretched;
+			}
+			
+			getHandThumbJoystick(hand, cam) {
+				if (!hand.joints) return null;
+				const thumbTip = hand.joints['thumb-tip'];
+				const thumbBase = hand.joints['thumb-metacarpal'] || hand.joints['thumb-phalanx-proximal'];
+				if (!thumbTip || !thumbBase) return null;
+
+				thumbTip.getWorldPosition(this.jointTip);
+				thumbBase.getWorldPosition(this.jointBase);
+
+				// Direction vector of the thumb in world space
+				const thumbDir = new THREE.Vector3().subVectors(this.jointTip, this.jointBase).normalize();
+
+				// Headset reference axes
+				const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+				const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+
+				// Dot products give signed components (-1 to +1) relative to user's view
+				const dotUp = thumbDir.dot(camUp);
+				const dotRight = thumbDir.dot(camRight);
+
+				const deadzone = 0.28;
+				let yawInput = 0;   // Up/Down
+				let pitchInput = 0; // Left/Right
+
+				if (Math.abs(dotUp) > deadzone) {
+					yawInput = (dotUp - Math.sign(dotUp) * deadzone) / (1.0 - deadzone);
+				}
+				if (Math.abs(dotRight) > deadzone) {
+					pitchInput = (dotRight - Math.sign(dotRight) * deadzone) / (1.0 - deadzone);
+				}
+
+				if (yawInput === 0 && pitchInput === 0) return null;
+
+				return { yawInput, pitchInput };
+			}
+			
+			
+
+
+            isHandMakingFist(hand) {
+                if (!hand.joints) return false;
+
+                const fingers = [
+                    ['index-finger-tip', 'index-finger-phalanx-proximal'],
+                    ['middle-finger-tip', 'middle-finger-phalanx-proximal'],
+                    ['ring-finger-tip', 'ring-finger-phalanx-proximal'],
+		    //['pinky-finger-tip', 'pinky-finger-phalanx-proximal']
+                ];
+
+                let curledFingers = 0;
+                for (let [tipName, baseName] of fingers) {
+                    const tip = hand.joints[tipName];
+                    const base = hand.joints[baseName];
+                    if (tip && base) {
+                        tip.getWorldPosition(this.jointTip);
+                        base.getWorldPosition(this.jointBase);
+                        if (this.jointTip.distanceTo(this.jointBase) < 0.05) {
+                            curledFingers++;
+                        }
+                    }
+                }
+                // When 3 or more fingers curl tightly inward toward the palm, consider it a fist
+                return curledFingers >= 3;
+            }
+
+            updatePalmMenuState() {
+                let leftPalmUp = false;
+                let isLeftHandTracked = false;
+                let palmTargetPos = null;
+
+                const UPWARD_THRESHOLD = 0.85;
+
+                for (let hand of this.hands) {
+                    if (hand.visible && hand.userData?.handedness === 'left' && hand.joints) {
+                        const wrist = hand.joints['wrist'];
+                        const indexKnuckle = hand.joints['index-finger-phalanx-proximal'];
+                        const pinkyKnuckle = hand.joints['pinky-finger-phalanx-proximal'];
+
+                        if (wrist && indexKnuckle && pinkyKnuckle) {
+                            wrist.getWorldPosition(this.palmP1);
+                            indexKnuckle.getWorldPosition(this.palmP2);
+                            pinkyKnuckle.getWorldPosition(this.palmP3);
+
+                            const v1 = this.tempVec.subVectors(this.palmP2, this.palmP1);
+                            const v2 = this.localDir.subVectors(this.palmP3, this.palmP1);
+
+                            if (v1.lengthSq() > 0.0001 && v2.lengthSq() > 0.0001) {
+                                isLeftHandTracked = true;
+                                this.palmNormal.crossVectors(v2, v1).normalize();
+
+                                if (this.palmNormal.y > UPWARD_THRESHOLD) {
+                                    leftPalmUp = true;
+                                    this.palmWorldPos.copy(this.palmP1).addScaledVector(this.palmNormal, 0.08);
+                                    palmTargetPos = this.palmWorldPos;
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (!isLeftHandTracked) {
+                    for (let i = 0; i < this.controllers.length; i++) {
+                        const controller = this.controllers[i];
+                        const grip = this.controllerGrips[i];
+
+                        if (controller.userData?.handedness === 'left') {
+                            this.controllerPalmDir.set(0.7, 0.7, 0.0).normalize();
+                            const quat = grip.getWorldQuaternion(this.tempQuat);
+                            this.controllerPalmDir.applyQuaternion(quat);
+
+                            if (this.controllerPalmDir.y > UPWARD_THRESHOLD) {
+                                leftPalmUp = true;
+                                grip.getWorldPosition(this.palmWorldPos);
+                                this.palmWorldPos.addScaledVector(this.controllerPalmDir, 0.12);
+                                palmTargetPos = this.palmWorldPos;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (this.isSpatialMenuOpen) {
+                    if (this.palmButtonMesh && this.palmButtonMesh.visible) this.palmButtonMesh.visible = false;
+                    return;
+                }
+
+                if (leftPalmUp && palmTargetPos) {
+                    this.palmButtonMesh.visible = true;
+                    this.palmButtonMesh.position.copy(palmTargetPos);
+
+                    if (this.renderer.xr && this.renderer.xr.isPresenting) {
+                        this.cameraRig.updateMatrixWorld(true);
+                        const xrCam = this.renderer.xr.getCamera();
+                        this.tempVec.setFromMatrixPosition(xrCam.matrix);
+                        this.tempVec.applyMatrix4(this.cameraRig.matrixWorld);
+                    } else {
+                        this.camera.getWorldPosition(this.tempVec);
+                    }
+                    this.palmButtonMesh.lookAt(this.tempVec);
+                } else {
+                    if (this.palmButtonMesh) this.palmButtonMesh.visible = false;
+                }
+            }
+
+            handleVRInteractions(dt) {
+                const nodeMeshes = this.nodes.map(n => n.mesh);
+                const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
+                this.raycaster.camera = cam;
+
+                this.updatePalmMenuState();
+
+                /* -------------------------------------------------------------
+                   1. Dual-Thumbstick Controls
+                ------------------------------------------------------------- */
+                let moveX = 0, moveY = 0;
+                let rotX = 0, rotY = 0;
+
+                for (let controller of this.controllers) {
+                    const gamepad = controller.userData?.gamepad;
+                    const handedness = controller.userData?.handedness;
+                    if (gamepad && gamepad.axes) {
+                        let sx = 0, sy = 0;
+                        if (gamepad.axes.length >= 4) {
+                            sx = gamepad.axes[2];
+                            sy = gamepad.axes[3];
+                        } else if (gamepad.axes.length >= 2) {
+                            sx = gamepad.axes[0];
+                            sy = gamepad.axes[1];
+                        }
+                        const deadzone = 0.15;
+                        if (Math.abs(sx) > deadzone || Math.abs(sy) > deadzone) {
+                            if (handedness === 'left') {
+                                moveX = sx;
+                                moveY = sy;
+                            } else if (handedness === 'right') {
+                                rotX = sx;
+                                rotY = sy;
+                            }
+                        }
+                    }
+                }
+
+                if (Math.abs(moveX) > 0.05 || Math.abs(moveY) > 0.05) {
+                    cam.getWorldDirection(this.camForward);
+                    this.camForward.normalize();
+
+                    this.camRight.set(1, 0, 0).applyQuaternion(cam.quaternion).normalize();
+
+                    this.moveVector.set(0, 0, 0);
+                    this.moveVector.addScaledVector(this.camForward, -moveY);
+                    this.moveVector.addScaledVector(this.camRight, moveX);
+
+                    const moveSpeed = 2.2;
+                    this.cameraRig.position.addScaledVector(this.moveVector, moveSpeed * dt);
+                    this.needsSpriteUpdate = true;
+                }
+
+                if (Math.abs(rotX) > 0.05 || Math.abs(rotY) > 0.05) {
+                    const rotSpeed = 2.2;
+                    const yawAngle = -rotX * rotSpeed * dt;
+                    const pitchAngle = -rotY * rotSpeed * dt;
+
+                    const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
+                    const camRightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+                    camRightVec.y = 0;
+                    camRightVec.normalize();
+                    const qPitch = new THREE.Quaternion().setFromAxisAngle(camRightVec, pitchAngle);
+
+                    const qTotal = new THREE.Quaternion().multiplyQuaternions(qPitch, qYaw);
+                    this.worldAnchor.quaternion.premultiply(qTotal);
+                    this.needsSpriteUpdate = true;
+                }
+
+                const currentlyHoveredNodeIds = new Set();
+                let anyPalmHovered = false;
+
+                /* -------------------------------------------------------------
+                   2. Laser Raycasting (Controllers)
+                ------------------------------------------------------------- */
+                for (let controller of this.controllers) {
+		    const prevNode = controller.userData.hoveredNode;
+		    controller.userData.hoveredPalm = false;
+		    controller.userData.hoveredVRButton = null;
+		    controller.userData.hoveredNode = null;
+
+		    const laser = controller.getObjectByName('laser');
+		    const reticle = controller.userData?.reticle;
+
+		    // Check if corresponding hand (by handedness) or this controller is gripping/fist
+		    const handedness = controller.userData?.handedness;
+		    const matchingHand = this.hands.find(h => h.userData?.handedness === handedness);
+		    const isHandFist = matchingHand && matchingHand.userData?.isFist;
+		    const isGrabbed = controller.userData.isGripping || isHandFist;
+
+		    // Hide laser & reticle when gripping or in fist
+		    if (isGrabbed) {
+		        if (laser) laser.visible = false;
+		        if (reticle) reticle.visible = false;
+		        continue; // Skip raycasting and node hover while gripping
+		    } else {
+		        if (laser) laser.visible = true;
+		    }
+
+		    this.workingMatrix.identity().extractRotation(controller.matrixWorld);
+		    this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+		    this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.workingMatrix);
+
+		    if (reticle) reticle.visible = false;
+
+		    if (this.palmButtonMesh.visible) {
+		        const palmHits = this.raycaster.intersectObject(this.palmButtonMesh, false);
+		        if (palmHits.length > 0) {
+		            controller.userData.hoveredPalm = true;
+		            anyPalmHovered = true;
+		            if (laser) laser.scale.z = palmHits[0].distance;
+		            if (reticle) {
+		                reticle.visible = true;
+		                reticle.position.copy(palmHits[0].point);
+		                reticle.quaternion.copy(this.palmButtonMesh.quaternion);
+		            }
+		            continue;
+		        }
+		    }
+
+		    if (this.hudMesh.visible) {
+		        const hudHits = this.raycaster.intersectObject(this.hudMesh, false);
+		        if (hudHits.length > 0) {
+		            const hit = hudHits[0];
+		            const uv = hit.uv;
+		            if (uv) {
+		                const canvasX = uv.x * 1024;
+		                const canvasY = (1 - uv.y) * 420;
+
+		                for (let btn of this.virtualButtons) {
+                		    if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
+		                        controller.userData.hoveredVRButton = btn;
+                		        break;
+		                    }
+		                }
+		            }
+		            if (laser) laser.scale.z = hit.distance;
+
+		            if (reticle) {
+		                reticle.visible = true;
+		                reticle.position.copy(hit.point).addScaledVector(this.raycaster.ray.direction, -0.002);
+                		reticle.quaternion.copy(this.hudMesh.getWorldQuaternion(new THREE.Quaternion()));
+              		    }
+		            continue;
+		        }
+		    }
+
+		    const hits = this.raycaster.intersectObjects(nodeMeshes, false);
+		    if (hits.length > 0) {
+		        const targetNode = this.nodes[hits[0].object.userData.nodeId];
+		        controller.userData.hoveredNode = targetNode;
+		        currentlyHoveredNodeIds.add(targetNode.id);
+
+		        if (laser) laser.scale.z = hits[0].distance;
+		        if (reticle) {
+		            reticle.visible = true;
+		            reticle.position.copy(hits[0].point).addScaledVector(this.raycaster.ray.direction, -0.005);
+		            const headWorldPos = new THREE.Vector3();
+		            if (this.renderer.xr && this.renderer.xr.isPresenting) {
+		                const xrCam = this.renderer.xr.getCamera();
+		                headWorldPos.setFromMatrixPosition(xrCam.matrix);
+		                headWorldPos.applyMatrix4(this.cameraRig.matrixWorld);
+		            } else {
+		                this.camera.getWorldPosition(headWorldPos);
+		            }
+		            reticle.lookAt(headWorldPos);                        
+		        }
+
+		        if (prevNode !== targetNode) {
+		            this.triggerHaptic(controller, 0.2, 15);
+		        }
+		    } else {
+		        if (laser) laser.scale.z = 4.5;
+		    }
+		}
+
+                /* -------------------------------------------------------------
+                   3. Direct Finger Pokes & Hand Grip (Fist) Tracking
+                ------------------------------------------------------------- */
+				for (let hand of this.hands) {
+					if (hand.joints && hand.visible) {
+						const indexTip = hand.joints['index-finger-tip'];
+						let handIsInteracting = false;
+
+						if (indexTip) {
+							const tipPos = this.tempVec.setFromMatrixPosition(indexTip.matrixWorld);
+
+							if (this.palmButtonMesh.visible && tipPos.distanceTo(this.palmButtonMesh.position) < 0.05) {
+								this.openSpatialMenu();
+								handIsInteracting = true;
+								return;
+							}
+
+							for (let n of this.nodes) {
+								const nWorld = n.mesh.getWorldPosition(this.tempNodePos);
+								if (tipPos.distanceTo(nWorld) < NODE_RADIUS * 1.3) {
+									handIsInteracting = true;
+									currentlyHoveredNodeIds.add(n.id);
+									const isRightHand = hand.userData?.handedness === 'right';
+
+									if (isRightHand) {
+										if (!n.isRevealed && !n.isFlagged) {
+											this.revealNode(n.id);
+										}
+									} else {
+										if (!n.userDataPokeDebounce && !n.isRevealed) {
+											n.userDataPokeDebounce = true;
+											this.toggleFlag(n.id);
+											setTimeout(() => { n.userDataPokeDebounce = false; }, 400);
+										}
+									}
+								}
+							}
+						}
+
+						// 1. Check Hand Fist (index, middle, ring curled)
+						const isFistNow = this.isHandMakingFist(hand);
+
+						// 2. Only trigger rotation when the thumb sticks out at a right angle from the wrist
+						const isThumbStickingOut = isFistNow && this.isThumbAtRightAngleFromWrist(hand);
+
+						if (isThumbStickingOut) {
+							// When using thumb-joystick rotation, suspend zero-G grab translation
+							if (this.activeGrabber === hand) {
+								this.onXRGrabEnd(hand);
+							}
+
+							const joy = this.getHandThumbJoystick(hand, cam);
+							if (joy) {
+								const rotSpeed = 2.2;
+
+								// Yaw:
+								// Thumb points UP (yawInput > 0)    -> Yaw Clockwise
+								// Thumb points DOWN (yawInput < 0)  -> Yaw Counter-Clockwise
+								const yawAngle = -joy.yawInput * rotSpeed * dt;
+
+								// Pitch:
+								// Thumb points LEFT (pitchInput < 0)  -> Pitch Clockwise
+								// Thumb points RIGHT (pitchInput > 0) -> Pitch Counter-Clockwise
+								const pitchAngle = joy.pitchInput * rotSpeed * dt;
+
+								const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
+
+								const camRightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+								camRightVec.y = 0;
+								camRightVec.normalize();
+								const qPitch = new THREE.Quaternion().setFromAxisAngle(camRightVec, pitchAngle);
+
+								const qTotal = new THREE.Quaternion().multiplyQuaternions(qPitch, qYaw);
+								this.worldAnchor.quaternion.premultiply(qTotal);
+								this.needsSpriteUpdate = true;
+							}
+						} else {
+							// Normal Zero-G locomotion when making a regular fist without the 90° thumb
+							if (isFistNow !== hand.userData.isFist) {
+								hand.userData.isFist = isFistNow;
+								if (isFistNow) {
+									if (!handIsInteracting) {
+										this.onXRGrabStart(hand);
+									}
+								} else {
+									if (this.activeGrabber === hand) {
+										this.onXRGrabEnd(hand);
+									}
+								}
+							}
+						}
+
+						// Position and update the 3D move arrows for the hand
+						if (hand.userData.moveGizmo) {
+							if (isFistNow && hand.visible) {
+								hand.userData.moveGizmo.visible = true;
+								const refJoint = hand.joints['middle-finger-phalanx-proximal'] || hand.joints['wrist'];
+								if (refJoint) {
+									refJoint.getWorldPosition(this.tempVec);
+									refJoint.getWorldQuaternion(this.tempQuat);
+									
+									// Float 6 cm in front of the knuckle/fist
+									this.localDir.set(0, 0, -0.06).applyQuaternion(this.tempQuat);
+									hand.userData.moveGizmo.position.copy(this.tempVec).add(this.localDir);
+									hand.userData.moveGizmo.quaternion.copy(this.tempQuat);
+								}
+							} else {
+								hand.userData.moveGizmo.visible = false;
+							}
+						}
+					}
+				}
+
+                for (let n of this.nodes) {
+                    if (currentlyHoveredNodeIds.has(n.id)) {
+                        n.mesh.scale.set(1.3, 1.3, 1.3);
+                    } else if (n.mesh.scale.x !== 1) {
+                        n.mesh.scale.set(1, 1, 1);
+                    }
+                }
+
+                if (this.hoveredPalmButton !== anyPalmHovered) {
+                    this.hoveredPalmButton = anyPalmHovered;
+                    this.renderPalmButtonTexture(this.hoveredPalmButton);
+                }
+
+                /* -------------------------------------------------------------
+                   4. Zero-G Locomotion: Grab & Pull/Push (Controllers & Fists)
+                ------------------------------------------------------------- */
+                if (this.activeGrabber) {
+                    this.getGrabberWorldPosition(this.activeGrabber, this.currentGrabberWorldPos);
+
+                    const playerDelta = new THREE.Vector3().subVectors(this.previousGrabberPos, this.currentGrabberWorldPos);
+                    this.cameraRig.position.add(playerDelta);
+
+                    const SPEED_BOOST = 2.0; 
+                    const instPlayerVel = playerDelta.clone().divideScalar(Math.max(dt, 0.001)).multiplyScalar(SPEED_BOOST);
+            
+                    const smoothFactor = 0.55;
+                    this.playerLinearVelocity.lerp(instPlayerVel, smoothFactor);
+
+                    this.previousGrabberPos.copy(this.currentGrabberWorldPos);
+                    this.needsSpriteUpdate = true;
+                } else if (this.isPlayerDrifting) {
+                    const drag = 0.996; 
+                    this.playerLinearVelocity.multiplyScalar(drag);
+
+                    this.cameraRig.position.addScaledVector(this.playerLinearVelocity, dt);
+                    this.needsSpriteUpdate = true;
+
+                    if (this.playerLinearVelocity.length() < 0.004) {
+                        this.playerLinearVelocity.set(0, 0, 0);
+                        this.isPlayerDrifting = false;
+                    }
+                }
+            }
+
+            initDesktopInteraction() {
+                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+                this.controls.target.set(0, 1.25, 0);
+                this.controls.enableDamping = true;
+
+                this.controls.addEventListener('change', () => {
+                    this.needsSpriteUpdate = true;
+                });
+
+                const mouse = new THREE.Vector2();
+                const dRay = new THREE.Raycaster();
+                let downPos = new THREE.Vector2();
+
+                window.addEventListener('pointerdown', (e) => downPos.set(e.clientX, e.clientY));
+                window.addEventListener('pointerup', (e) => {
+                    if (this.renderer.xr.isPresenting) return;
+                    if (downPos.distanceTo(new THREE.Vector2(e.clientX, e.clientY)) > 6) return;
+
+                    mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+                    mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+                    dRay.setFromCamera(mouse, this.camera);
+
+                    if (this.palmButtonMesh.visible) {
+                        const pHits = dRay.intersectObject(this.palmButtonMesh, false);
+                        if (pHits.length > 0) {
+                            this.openSpatialMenu();
+                            return;
+                        }
+                    }
+
+                    if (this.hudMesh.visible) {
+                        const hudHits = dRay.intersectObject(this.hudMesh, false);
+                        if (hudHits.length > 0) {
+                            const uv = hudHits[0].uv;
+                            const canvasX = uv.x * 1024;
+                            const canvasY = (1 - uv.y) * 420;
+                            for (let btn of this.virtualButtons) {
+                                if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
+                                    this.handleSpatialUIPress(btn.id);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+
+                    const hits = dRay.intersectObjects(this.nodes.map(n => n.mesh), false);
+                    if (hits.length > 0) {
+                        const id = hits[0].object.userData.nodeId;
+                        if (e.button === 2 || this.desktopFlagMode) this.toggleFlag(id);
+                        else this.revealNode(id);
+                    }
+                });
+
+                window.addEventListener('contextmenu', e => e.preventDefault());
+            }
+
+            /* -------------------------------------------------------------
+               8. 2D DOM UI & Modal Bindings
+            ------------------------------------------------------------- */
+            setDesktopFlagMode(val) {
+                this.desktopFlagMode = val;
+                document.getElementById('btn-mode-reveal').classList.toggle('active', !this.desktopFlagMode);
+                document.getElementById('btn-mode-flag').classList.toggle('active', this.desktopFlagMode);
+                this.update2DHUD();
+            }
+
+            init2DUI() {
+                document.getElementById('btn-mode-reveal').onclick = () => { sfx.click(); this.setDesktopFlagMode(false); };
+                document.getElementById('btn-mode-flag').onclick = () => { sfx.click(); this.setDesktopFlagMode(true); };
+                document.getElementById('btn-reset').onclick = () => { sfx.click(); this.startNewGame(); };
+
+                document.getElementById('btn-toggle-spatial-menu').onclick = () => {
+                    if (this.isSpatialMenuOpen) this.closeSpatialMenu();
+                    else this.openSpatialMenu();
+                };
+
+                const mGen = document.getElementById('modal-gen');
+                const mDiff = document.getElementById('modal-difficulty');
+                const mTut = document.getElementById('modal-tutorial');
+                const mOver = document.getElementById('modal-gameover');
+
+                document.getElementById('btn-gen-mode').onclick = () => { sfx.click(); mGen.style.display = 'flex'; };
+                document.getElementById('btn-difficulty').onclick = () => { sfx.click(); mDiff.style.display = 'flex'; };
+                document.getElementById('btn-tutorial').onclick = () => { sfx.click(); mTut.style.display = 'flex'; };
+
+                document.querySelectorAll('.modal-close').forEach(b => {
+                    b.onclick = () => { sfx.click(); mGen.style.display = mDiff.style.display = mTut.style.display = 'none'; };
+                });
+
+                document.querySelectorAll('.gen-options .btn').forEach(btn => {
+                    btn.onclick = (e) => {
+                        sfx.click();
+                        this.genAlgorithm = e.currentTarget.dataset.gen;
+                        mGen.style.display = 'none';
+                        this.startNewGame();
+                    };
+                });
+
+                document.querySelectorAll('.diff-grid .btn').forEach(btn => {
+                    btn.onclick = (e) => {
+                        sfx.click();
+                        this.currentDiff = e.currentTarget.dataset.diff;
+                        mDiff.style.display = 'none';
+                        this.startNewGame();
+                    };
+                });
+
+                document.getElementById('btn-inspect').onclick = () => { sfx.click(); mOver.style.display = 'none'; };
+                document.getElementById('btn-play-again').onclick = () => {
+                    sfx.click();
+                    mOver.style.display = 'none';
+                    this.startNewGame();
+                };
+            }
+
+            update2DHUD() {
+                const curMines = this.difficulties[this.currentDiff].mines;
+                let flagged = 0, unrevealed = 0;
+                for (let n of this.nodes) {
+                    if (n.isFlagged) flagged++;
+                    if (!n.isRevealed) unrevealed++;
+                }
+                document.getElementById('hud-mines').textContent = Math.max(0, curMines - flagged);
+                document.getElementById('hud-nodes').textContent = unrevealed;
+
+                const diffLabels = { easy: 'Easy', medium: 'Medium', hard: 'Hard', vhard: 'V-Hard', insane: 'Insane' };
+                document.getElementById('hud-diff').textContent = diffLabels[this.currentDiff] || this.currentDiff.toUpperCase();
+
+                const genLabels = { 'tree': 'Tree', 'poisson-uniform': 'P-Uniform', 'poisson-seq': 'P-Sequential', 'poisson-biased': 'P-Biased' };
+                document.getElementById('hud-gen').textContent = genLabels[this.genAlgorithm] || 'Tree';
+                document.getElementById('hud-mode').textContent = this.desktopFlagMode ? '🚩 Flag' : '⛏️ Reveal';
+                document.getElementById('btn-toggle-spatial-menu').textContent = `3D Menu: ${this.isSpatialMenuOpen ? 'Open' : 'Closed'}`;
+            }
+
+            startNewGame() {
+                this.firstClick = true;
+                this.inGame = true;
+                this.buildGraph();
+                this.update2DHUD();
+                this.renderSpatialUI();
+                this.needsSpriteUpdate = true;
+                this.spriteUpdateTimer = 0;
+            }
+
+            /* -------------------------------------------------------------
+               9. Main Loop
+            ------------------------------------------------------------- */
+            render(time) {
+                const dt = 0.016;
+
+                if (this.renderer.xr.isPresenting) {
+                    this.handleVRInteractions(dt);
+                } else {
+                    this.controls.update();
+                    if (!this.inGame) {
+                        this.graphGroup.rotation.y += 0.002;
+                        this.needsSpriteUpdate = true;
+                    }
+                }
+
+                this.updateSpatialHUDPosition();
+
+                this.spriteUpdateTimer += dt;
+                if (this.needsSpriteUpdate || this.spriteUpdateTimer >= 1.0) {
+                    this.updateAllSprites();
+                    this.spriteUpdateTimer = 0;
+                    this.needsSpriteUpdate = false;
+                }
+
+                this.updateParticles(dt);
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        /* -------------------------------------------------------------
+           Bootstrap
+        ------------------------------------------------------------- */
+        window.addEventListener('DOMContentLoaded', () => {
+            const app = new MinesweeperApp();
+            app.renderer.setAnimationLoop((time) => {
+                app.render(time);
+            });
+        });
+    </script>
+</body>
+</html>
