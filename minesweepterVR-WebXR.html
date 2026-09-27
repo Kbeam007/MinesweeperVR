@@ -530,12 +530,6 @@
                 this.palmWorldPos = new THREE.Vector3();
                 this.controllerPalmDir = new THREE.Vector3();
 
-                // Debug State Telemetry
-                this.debugHandTracked = false;
-                this.debugPalmY = 0;
-                this.debugLeftPalmUp = false;
-                this.debugHudTimer = 0;
-
                 // Locomotion scratch vectors
                 this.camForward = new THREE.Vector3();
                 this.camRight = new THREE.Vector3();
@@ -597,25 +591,6 @@
                 this.controllerGrips = [];
                 this.hands = [];
                 this.raycaster = new THREE.Raycaster();
-
-                // Method A: 3D Direction Vector Arrow Helper for live gesture visualization
-                this.debugArrow = new THREE.ArrowHelper(
-                    new THREE.Vector3(0, 1, 0),
-                    new THREE.Vector3(0, 0, 0),
-                    0.15,
-                    0xffff00,
-                    0.035,
-                    0.02
-                );
-                this.debugArrow.visible = false;
-                this.debugArrow.renderOrder = 10001;
-                if (this.debugArrow.line && this.debugArrow.line.material) {
-                    this.debugArrow.line.material.depthTest = false;
-                }
-                if (this.debugArrow.cone && this.debugArrow.cone.material) {
-                    this.debugArrow.cone.material.depthTest = false;
-                }
-                this.scene.add(this.debugArrow);
 
                 for (let i = 0; i < 2; i++) {
                     const controller = this.renderer.xr.getController(i);
@@ -963,15 +938,6 @@
                     this.registerVJButton('close-page', 60, 210, 420, 120, 'INSPECT BOARD', false);
                     this.registerVJButton('new-game', 544, 210, 420, 120, 'PLAY AGAIN', true);
                 }
-
-                // Method B: Spatial HUD Telemetry Readout along bottom border
-                ctx.fillStyle = '#00ffea';
-                ctx.font = '15px monospace';
-                ctx.textAlign = 'left';
-                const trackedMode = this.debugHandTracked ? 'Hand Joints' : 'Controller Grip';
-                const valY = this.debugPalmY !== undefined ? this.debugPalmY.toFixed(2) : '0.00';
-                const status = this.debugLeftPalmUp ? 'TRIGGERED (UP)' : 'IDLE';
-                ctx.fillText(`[DEBUG] Mode: ${trackedMode} | PalmDir Y: ${valY} (Need > 0.55) | Status: ${status}`, 40, 404);
 
                 this.hudTexture.needsUpdate = true;
             }
@@ -1778,7 +1744,7 @@
                 let palmTargetPos = null;
 
                 // Threshold corresponds to ~56 degrees from vertical
-                const UPWARD_THRESHOLD = 0.55;
+                const UPWARD_THRESHOLD = 0.68;
 
                 // 1. Check Hand Tracking (Only if hand is actively visible and tracked)
                 for (let hand of this.hands) {
@@ -1798,14 +1764,6 @@
                             if (v1.lengthSq() > 0.0001 && v2.lengthSq() > 0.0001) {
                                 isLeftHandTracked = true;
                                 this.palmNormal.crossVectors(v2, v1).normalize();
-
-                                // Method A Visualizer update for Hands
-                                if (this.debugArrow) {
-                                    this.debugArrow.visible = true;
-                                    this.debugArrow.position.copy(this.palmP1);
-                                    this.debugArrow.setDirection(this.palmNormal);
-                                    this.debugArrow.setColor(this.palmNormal.y > UPWARD_THRESHOLD ? 0x00ff66 : 0xffff00);
-                                }
 
                                 if (this.palmNormal.y > UPWARD_THRESHOLD) {
                                     leftPalmUp = true;
@@ -1831,14 +1789,6 @@
                             const quat = grip.getWorldQuaternion(this.tempQuat);
                             this.controllerPalmDir.applyQuaternion(quat);
 
-                            // Method A Visualizer update for Controllers
-                            if (this.debugArrow) {
-                                this.debugArrow.visible = true;
-                                grip.getWorldPosition(this.debugArrow.position);
-                                this.debugArrow.setDirection(this.controllerPalmDir);
-                                this.debugArrow.setColor(this.controllerPalmDir.y > UPWARD_THRESHOLD ? 0x00ff66 : 0xffff00);
-                            }
-
                             if (this.controllerPalmDir.y > UPWARD_THRESHOLD) {
                                 leftPalmUp = true;
                                 grip.getWorldPosition(this.palmWorldPos);
@@ -1849,11 +1799,6 @@
                         }
                     }
                 }
-
-                // Store state for Method B live HUD telemetry
-                this.debugHandTracked = isLeftHandTracked;
-                this.debugPalmY = isLeftHandTracked ? this.palmNormal.y : this.controllerPalmDir.y;
-                this.debugLeftPalmUp = leftPalmUp;
 
                 if (this.isSpatialMenuOpen) {
                     if (this.palmButtonMesh && this.palmButtonMesh.visible) this.palmButtonMesh.visible = false;
@@ -2273,13 +2218,6 @@
 
                 if (this.renderer.xr.isPresenting) {
                     this.handleVRInteractions(dt);
-
-                    // Method B: Live refresh Spatial HUD telemetry while dashboard is open
-                    this.debugHudTimer += dt;
-                    if (this.isSpatialMenuOpen && this.debugHudTimer >= 0.1) {
-                        this.debugHudTimer = 0;
-                        this.renderSpatialUI();
-                    }
                 } else {
                     this.controls.update();
                     if (!this.inGame) {
