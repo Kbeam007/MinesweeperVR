@@ -1608,23 +1608,28 @@
                 this.checkWinCondition();
             }
 
-            toggleFlag(id) {
-                const node = this.nodes[id];
-                if (!this.inGame || node.isRevealed) return;
+			toggleFlag(id) {
+				const node = this.nodes[id];
+				if (!this.inGame || node.isRevealed) return;
 
-                node.isFlagged = !node.isFlagged;
-                if (node.isFlagged) {
-                    sfx.flag();
-                    node.mesh.material.color.setHex(COLORS.NODE_FLAG);
-                    if (node.sprite) node.sprite.visible = false;
-                } else {
-                    sfx.unflag();
-                    node.mesh.material.color.setHex(node.isHinted ? COLORS.NODE_HINT : COLORS.NODE_UNREVEALED);
-                    if (node.sprite) {
-                        node.sprite.visible = true;
-                        this.orientSprite(node);
-                    }
-                }
+				node.isFlagged = !node.isFlagged;
+				if (node.isFlagged) {
+					sfx.flag();
+					node.mesh.material.color.setHex(COLORS.NODE_FLAG);
+				} else {
+					sfx.unflag();
+					node.mesh.material.color.setHex(node.isHinted ? COLORS.NODE_HINT : COLORS.NODE_UNREVEALED);
+				}
+
+				if (node.sprite) {
+					this.orientSprite(node);
+				}
+
+				this.updateLinksColor();
+				this.update2DHUD();
+				this.renderSpatialUI();
+				this.checkWinCondition();
+			}
 
                 this.updateLinksColor();
                 this.update2DHUD();
