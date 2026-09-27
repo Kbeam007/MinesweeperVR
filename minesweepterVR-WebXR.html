@@ -238,7 +238,7 @@
 
         <footer>
             <div class="hud-box interactive vr-tip">
-                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Grip / Fist = Pull/Push Yourself (Release to float, Grip/Fist again to brake)
+                <b>VR CONTROLS:</b> <span style="color:#00c8ff;">Right Hand = Open</span> | <span style="color:#ff4466;">Left Hand = Flag</span> | Fist/Grip = Move | Fist + Thumbs-Up = Rotate Matrix | Open Hand = Laser
             </div>
             <div class="hud-box interactive" style="display:flex; gap: 10px;">
                 <button class="btn active" id="btn-mode-reveal">⛏️ Click: Reveal</button>
@@ -294,10 +294,12 @@
            • <b>Safe Start:</b> Your first reveal or poke is always 100% safe.<br>
            • <b>Blue Nodes:</b> Revealed sectors showing adjacent mine count.<br>
            • <b>Yellow Nodes:</b> Clue nodes showing unrevealed neighboring mine counts.<br>
-           • <b style="color:#00d0ff;">🔵 RIGHT HAND (BLUE):</b> Open/Reveal nodes (Trigger or poke).<br>
-           • <b style="color:#ff4466;">🔴 LEFT HAND (RED):</b> Flag/Mark mines (Trigger or poke).<br>
-           • <b>Thumbsticks:</b> Left Stick = Walk/Strafe | Right Stick = Rotate Matrix.<br>
-           • <b>Zero-G Locomotion (Controllers & Hands):</b> Squeeze <b>Grip</b> on your controller OR close either hand into a <b>Fist</b> in empty space to pull/push yourself forward, backward, up, or down. Release to coast in weightless zero-g! <b>Make a fist or squeeze grip again at any time to instantly brake & stop.</b><br>
+           • <b style="color:#00d0ff;">🔵 RIGHT HAND (BLUE):</b> Open/Reveal nodes.<br>
+           • <b style="color:#ff4466;">🔴 LEFT HAND (RED):</b> Flag/Mark mines.<br>
+           • <b>Hand Gestures:</b><br>
+           &nbsp;&nbsp;• <b>Open Hand / Point:</b> Laser pointer is active to reveal, flag, or interact.<br>
+           &nbsp;&nbsp;• <b>Fist:</b> Directional 3D arrows appear. Pull and push yourself through zero-g.<br>
+           &nbsp;&nbsp;• <b>Fist + Thumbs Up:</b> Directional arrows disappear and circular <b>Rotation Ring</b> appears over thumb to rotate the minefield.<br>
            • <b>Wrist Menu:</b> Flip your left palm upward to summon the dashboard!
         </p>
         <div class="modal-buttons">
@@ -505,8 +507,8 @@
                     }
                 };
 
-                // Player Zero-G Locomotion & Weightless Inertia (Controllers + Hands)
-                this.activeGrabber = null; // can be a controller or a hand
+                // Player Zero-G Locomotion & Weightless Inertia
+                this.activeGrabber = null;
                 this.previousGrabberPos = new THREE.Vector3();
                 this.playerLinearVelocity = new THREE.Vector3();
                 this.isPlayerDrifting = false;
@@ -529,7 +531,7 @@
                 this.palmWorldPos = new THREE.Vector3();
                 this.controllerPalmDir = new THREE.Vector3();
 
-                // Locomotion scratch vectors
+                // Locomotion & scratch vectors
                 this.camForward = new THREE.Vector3();
                 this.camRight = new THREE.Vector3();
                 this.moveVector = new THREE.Vector3();
@@ -599,7 +601,7 @@
                     controller.userData.hoveredNode = null;
                     controller.userData.hoveredVRButton = null;
                     controller.userData.hoveredPalm = false;
-		    controller.userData.isGripping = false;
+                    controller.userData.isGripping = false;
 
                     const lineGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,0,0), new THREE.Vector3(0,0,-1)]);
                     const lineMat = new THREE.LineBasicMaterial({
@@ -639,6 +641,7 @@
 
                     const hand = this.renderer.xr.getHand(i);
                     hand.userData.isFist = false;
+                    hand.userData.isThumbRotating = false;
                     hand.add(this.handModelFactory.createHandModel(hand, 'mesh'));
                     this.cameraRig.add(hand);
 
@@ -654,9 +657,11 @@
                         controller.userData.hoveredNode = null;
                         controller.userData.hoveredVRButton = null;
                         controller.userData.hoveredPalm = false;
-						controller.userData.isGripping = false;
-						if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = false;
-						if (hand.userData.moveGizmo) hand.userData.moveGizmo.visible = false;
+                        controller.userData.isGripping = false;
+                        if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = false;
+                        if (controller.userData.rotGizmo) controller.userData.rotGizmo.visible = false;
+                        if (hand.userData.moveGizmo) hand.userData.moveGizmo.visible = false;
+                        if (hand.userData.rotGizmo) hand.userData.rotGizmo.visible = false;
                         if (this.activeGrabber === controller) {
                             this.onXRGrabEnd(controller);
                         }
@@ -669,150 +674,177 @@
                     });
                     hand.addEventListener('disconnected', () => {
                         hand.userData.handedness = null;
-						if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = false;
-						if (hand.userData.moveGizmo) hand.userData.moveGizmo.visible = false;
+                        if (hand.userData.moveGizmo) hand.userData.moveGizmo.visible = false;
+                        if (hand.userData.rotGizmo) hand.userData.rotGizmo.visible = false;
                         if (this.activeGrabber === hand) {
                             this.onXRGrabEnd(hand);
                         }
                     });
 
                     controller.addEventListener('selectstart', () => this.onXRTriggerDown(controller));
-					controller.addEventListener('squeezestart', () => {
-						controller.userData.isGripping = true;
-						if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = true;
-						this.onXRGrabStart(controller);
-					});
+                    controller.addEventListener('squeezestart', () => {
+                        controller.userData.isGripping = true;
+                        if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = true;
+                        this.onXRGrabStart(controller);
+                    });
 
-					controller.addEventListener('squeezeend', () => {
-						controller.userData.isGripping = false;
-						if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = false;
-						this.onXRGrabEnd(controller);
-					});
+                    controller.addEventListener('squeezeend', () => {
+                        controller.userData.isGripping = false;
+                        if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = false;
+                        this.onXRGrabEnd(controller);
+                    });
 
                     this.controllers.push(controller);
                     this.hands.push(hand);
                 }
             }
 
-	    createDoubleEndedGizmo(colorHex) {
-	        const group = new THREE.Group();
-	        const mat = new THREE.MeshBasicMaterial({
-	            color: colorHex,
-	            depthTest: false,
-	            depthWrite: false,
-	            transparent: true,
-	            opacity: 0.95
-	        });
+            createDoubleEndedGizmo(colorHex) {
+                const group = new THREE.Group();
+                const mat = new THREE.MeshBasicMaterial({
+                    color: colorHex,
+                    depthTest: false,
+                    depthWrite: false,
+                    transparent: true,
+                    opacity: 0.95
+                });
 
-	        const totalLen = 0.08;
-	        const coneH = 0.015;
-	        const coneR = 0.0055;
-	        const shaftR = 0.0016;
-	        const shaftLen = totalLen - coneH * 2;
+                const totalLen = 0.08;
+                const coneH = 0.015;
+                const coneR = 0.0055;
+                const shaftR = 0.0016;
+                const shaftLen = totalLen - coneH * 2;
 
-	        const createAxis = () => {
-	            const axisGroup = new THREE.Group();
-        
-	            // Central shaft
-	            const shaftGeo = new THREE.CylinderGeometry(shaftR, shaftR, shaftLen, 8);
-	            const shaft = new THREE.Mesh(shaftGeo, mat);
-	            shaft.renderOrder = 9999;
-	            axisGroup.add(shaft);
+                const createAxis = () => {
+                    const axisGroup = new THREE.Group();
+            
+                    const shaftGeo = new THREE.CylinderGeometry(shaftR, shaftR, shaftLen, 8);
+                    const shaft = new THREE.Mesh(shaftGeo, mat);
+                    shaft.renderOrder = 9999;
+                    axisGroup.add(shaft);
 
-	            // Positive pointy end
-	            const coneGeo = new THREE.ConeGeometry(coneR, coneH, 12);
-	            const topCone = new THREE.Mesh(coneGeo, mat);
-	            topCone.position.y = shaftLen / 2 + coneH / 2;
-	            topCone.renderOrder = 9999;
-	            axisGroup.add(topCone);
+                    const coneGeo = new THREE.ConeGeometry(coneR, coneH, 12);
+                    const topCone = new THREE.Mesh(coneGeo, mat);
+                    topCone.position.y = shaftLen / 2 + coneH / 2;
+                    topCone.renderOrder = 9999;
+                    axisGroup.add(topCone);
 
-	            // Negative pointy end
-	            const bottomCone = new THREE.Mesh(coneGeo, mat);
-        	    bottomCone.position.y = -(shaftLen / 2 + coneH / 2);
-	            bottomCone.rotation.x = Math.PI;
-	            bottomCone.renderOrder = 9999;
-	            axisGroup.add(bottomCone);
+                    const bottomCone = new THREE.Mesh(coneGeo, mat);
+                    bottomCone.position.y = -(shaftLen / 2 + coneH / 2);
+                    bottomCone.rotation.x = Math.PI;
+                    bottomCone.renderOrder = 9999;
+                    axisGroup.add(bottomCone);
 
-	            return axisGroup;
-	        };
+                    return axisGroup;
+                };
 
-	        // Y-Axis (Vertical)
-	        const yAxis = createAxis();
-	        group.add(yAxis);
+                const yAxis = createAxis();
+                group.add(yAxis);
 
-	        // X-Axis (Horizontal) - perpendicular to Y
-	        const xAxis = createAxis();
-	        xAxis.rotation.z = Math.PI / 2;
-	        group.add(xAxis);
+                const xAxis = createAxis();
+                xAxis.rotation.z = Math.PI / 2;
+                group.add(xAxis);
 
-	        // Z-Axis (Depth) - perpendicular to X and Y
-	        const zAxis = createAxis();
-	        zAxis.rotation.x = Math.PI / 2;
-	        group.add(zAxis);
+                const zAxis = createAxis();
+                zAxis.rotation.x = Math.PI / 2;
+                group.add(zAxis);
 
-	        group.visible = false;
-	        group.renderOrder = 9999;
-	        return group;
-	    }
+                group.visible = false;
+                group.renderOrder = 9999;
+                return group;
+            }
 
-			applyHandTheming(controller, grip, handedness) {
-				const isRight = handedness === 'right';
-				const colorHex = isRight ? COLORS.RIGHT_REVEAL : COLORS.LEFT_FLAG;
+            createRotationGizmo(colorHex) {
+                const group = new THREE.Group();
+                const mat = new THREE.MeshBasicMaterial({
+                    color: colorHex,
+                    depthTest: false,
+                    depthWrite: false,
+                    transparent: true,
+                    opacity: 0.95
+                });
 
-				const laser = controller.getObjectByName('laser');
-				if (laser) laser.material.color.setHex(colorHex);
+                // Circular open torus arc for rotation representation
+                const arcAngle = Math.PI * 1.55;
+                const ringRadius = 0.032;
+                const tubeRadius = 0.002;
+                const ringGeo = new THREE.TorusGeometry(ringRadius, tubeRadius, 8, 32, arcAngle);
+                const ring = new THREE.Mesh(ringGeo, mat);
+                ring.rotation.x = Math.PI / 2;
+                ring.renderOrder = 9999;
+                group.add(ring);
 
-				const reticle = controller.userData?.reticle;
-				if (reticle) reticle.material.color.setHex(colorHex);
+                // Directional arrowhead at tip of circular arc
+                const coneGeo = new THREE.ConeGeometry(0.006, 0.014, 12);
+                const cone = new THREE.Mesh(coneGeo, mat);
+                const tipAngle = arcAngle;
+                cone.position.set(Math.cos(tipAngle) * ringRadius, 0, -Math.sin(tipAngle) * ringRadius);
+                cone.rotation.y = tipAngle + Math.PI / 2;
+                cone.renderOrder = 9999;
+                group.add(cone);
 
-				// Create and attach the double-ended 3D move gizmo
-				if (controller.userData.moveGizmo) {
-					controller.remove(controller.userData.moveGizmo);
-				}
-				const gizmo = this.createDoubleEndedGizmo(colorHex);
-				gizmo.position.set(0, 0, -0.08); // Float in front of the controller
-				controller.add(gizmo);
-				controller.userData.moveGizmo = gizmo;
+                group.visible = false;
+                group.renderOrder = 9999;
+                return group;
+            }
 
-				setTimeout(() => {
-					grip.traverse((child) => {
-						if (child.isMesh && child.material) {
-							child.material = child.material.clone();
-							child.material.color.setHex(colorHex);
-							if ('emissive' in child.material) {
-								child.material.emissive.setHex(colorHex);
-								child.material.emissiveIntensity = 0.2;
-							}
-						}
-					});
-				}, 300);
-			}
+            applyHandTheming(controller, grip, handedness) {
+                const isRight = handedness === 'right';
+                const colorHex = isRight ? COLORS.RIGHT_REVEAL : COLORS.LEFT_FLAG;
 
-			applyHandModelTheming(hand, handedness) {
-				const isRight = handedness === 'right';
-				const colorHex = isRight ? COLORS.RIGHT_REVEAL : COLORS.LEFT_FLAG;
+                const laser = controller.getObjectByName('laser');
+                if (laser) laser.material.color.setHex(colorHex);
 
-				// Create floating 3D move gizmo in scene for hand tracking
-				if (hand.userData.moveGizmo) {
-					this.scene.remove(hand.userData.moveGizmo);
-				}
-				const gizmo = this.createDoubleEndedGizmo(colorHex);
-				this.scene.add(gizmo);
-				hand.userData.moveGizmo = gizmo;
+                const reticle = controller.userData?.reticle;
+                if (reticle) reticle.material.color.setHex(colorHex);
 
-				setTimeout(() => {
-					hand.traverse((child) => {
-						if (child.isMesh && child.material) {
-							child.material = child.material.clone();
-							child.material.color.setHex(colorHex);
-							if ('emissive' in child.material) {
-								child.material.emissive.setHex(colorHex);
-								child.material.emissiveIntensity = 0.3;
-							}
-						}
-					});
-				}, 300);
-			}
+                if (controller.userData.moveGizmo) controller.remove(controller.userData.moveGizmo);
+                const gizmo = this.createDoubleEndedGizmo(colorHex);
+                gizmo.position.set(0, 0, -0.08);
+                controller.add(gizmo);
+                controller.userData.moveGizmo = gizmo;
+
+                setTimeout(() => {
+                    grip.traverse((child) => {
+                        if (child.isMesh && child.material) {
+                            child.material = child.material.clone();
+                            child.material.color.setHex(colorHex);
+                            if ('emissive' in child.material) {
+                                child.material.emissive.setHex(colorHex);
+                                child.material.emissiveIntensity = 0.2;
+                            }
+                        }
+                    });
+                }, 300);
+            }
+
+            applyHandModelTheming(hand, handedness) {
+                const isRight = handedness === 'right';
+                const colorHex = isRight ? COLORS.RIGHT_REVEAL : COLORS.LEFT_FLAG;
+
+                if (hand.userData.moveGizmo) this.scene.remove(hand.userData.moveGizmo);
+                const moveGizmo = this.createDoubleEndedGizmo(colorHex);
+                this.scene.add(moveGizmo);
+                hand.userData.moveGizmo = moveGizmo;
+
+                if (hand.userData.rotGizmo) this.scene.remove(hand.userData.rotGizmo);
+                const rotGizmo = this.createRotationGizmo(colorHex);
+                this.scene.add(rotGizmo);
+                hand.userData.rotGizmo = rotGizmo;
+
+                setTimeout(() => {
+                    hand.traverse((child) => {
+                        if (child.isMesh && child.material) {
+                            child.material = child.material.clone();
+                            child.material.color.setHex(colorHex);
+                            if ('emissive' in child.material) {
+                                child.material.emissive.setHex(colorHex);
+                                child.material.emissiveIntensity = 0.3;
+                            }
+                        }
+                    });
+                }, 300);
+            }
 
             /* -------------------------------------------------------------
                4. Spatial HUD & Wrist Menu
@@ -1003,25 +1035,24 @@
                     ctx.font = 'bold 19px monospace';
                     ctx.fillStyle = '#00c8ff';
                     ctx.textAlign = 'left';
-                    ctx.fillText('• RIGHT CONTROLLER / HAND (BLUE):', 40, 70);
+                    ctx.fillText('• RIGHT HAND (BLUE):', 40, 70);
                     ctx.font = '15px monospace';
                     ctx.fillStyle = '#ffffff';
-                    ctx.fillText('  Triggers laser / finger pokes REVEAL safe nodes.', 60, 92);
+                    ctx.fillText('  Open hand laser / finger pokes REVEAL safe nodes.', 60, 92);
 
                     ctx.font = 'bold 19px monospace';
                     ctx.fillStyle = '#ff4466';
-                    ctx.fillText('• LEFT CONTROLLER / HAND (RED):', 40, 122);
+                    ctx.fillText('• LEFT HAND (RED):', 40, 122);
                     ctx.font = '15px monospace';
                     ctx.fillStyle = '#ffffff';
-                    ctx.fillText('  Triggers laser / finger pokes FLAG dangerous mine nodes.', 60, 144);
+                    ctx.fillText('  Open hand laser / finger pokes FLAG dangerous mine nodes.', 60, 144);
 
                     ctx.font = '15px monospace';
                     ctx.fillStyle = '#88ffaa';
-                    ctx.fillText('• THUMBSTICKS: Left Stick = Move/Strafe | Right Stick = Rotate Matrix.', 40, 180);
-                    ctx.fillText('• ZERO-G GRIP / FIST: Squeeze Grip OR form a Fist in empty space to grab space.', 40, 208);
-                    ctx.fillText('• PULL & PUSH: Drag yourself smoothly in any direction (X, Y, Z).', 40, 236);
-                    ctx.fillText('• RELEASE TO GLIDE: Open your hand / release grip to coast in weightless drift.', 40, 264);
-                    ctx.fillText('• BRAKE: Make a fist or squeeze grip again at any time to instantly brake to a stop.', 40, 292);
+                    ctx.fillText('• FIST (NO THUMB): 3D arrows appear. Pull & push yourself in zero-g.', 40, 185);
+                    ctx.fillText('• FIST + THUMBS UP: Circular Rotation Gizmo appears. Tilt thumb to rotate matrix.', 40, 215);
+                    ctx.fillText('• OPEN HAND: Returns to normal laser pointer mode instantly.', 40, 245);
+                    ctx.fillText('• PALM UP: Turn left palm up to summon this dashboard at any time.', 40, 275);
 
                     this.registerVJButton('close-page', 40, 325, 944, 60, 'RETURN TO SYSTEM', true);
                 } else if (this.vrUIPage === 'gameover') {
@@ -1114,7 +1145,6 @@
                 if (this.palmButtonMesh) this.palmButtonMesh.visible = false;
                 
                 this.updateSpatialHUDPosition(true);
-
                 this.updateControllerVisualHierarchy();
                 this.renderSpatialUI();
                 this.update2DHUD();
@@ -1841,77 +1871,67 @@
                 }
             }
 
-			isThumbAtRightAngleFromWrist(hand) {
-				if (!hand.joints) return false;
+            isThumbAtRightAngleFromWrist(hand) {
+                if (!hand.joints) return false;
 
-				const wrist = hand.joints['wrist'];
-				const middleKnuckle = hand.joints['middle-finger-phalanx-proximal'];
-				const thumbBase = hand.joints['thumb-metacarpal'] || hand.joints['thumb-phalanx-proximal'];
-				const thumbTip = hand.joints['thumb-tip'];
+                const wrist = hand.joints['wrist'];
+                const middleKnuckle = hand.joints['middle-finger-phalanx-proximal'];
+                const thumbBase = hand.joints['thumb-metacarpal'] || hand.joints['thumb-phalanx-proximal'];
+                const thumbTip = hand.joints['thumb-tip'];
 
-				if (!wrist || !middleKnuckle || !thumbBase || !thumbTip) return false;
+                if (!wrist || !middleKnuckle || !thumbBase || !thumbTip) return false;
 
-				// 1. Vector pointing straight along the hand from the wrist to the middle knuckle
-				wrist.getWorldPosition(this.jointBase);
-				middleKnuckle.getWorldPosition(this.tempVec);
-				const wristAxis = new THREE.Vector3().subVectors(this.tempVec, this.jointBase).normalize();
+                wrist.getWorldPosition(this.jointBase);
+                middleKnuckle.getWorldPosition(this.tempVec);
+                const wristAxis = new THREE.Vector3().subVectors(this.tempVec, this.jointBase).normalize();
 
-				// 2. Vector pointing along the thumb from base to tip
-				thumbBase.getWorldPosition(this.jointBase);
-				thumbTip.getWorldPosition(this.jointTip);
-				const thumbDir = new THREE.Vector3().subVectors(this.jointTip, this.jointBase).normalize();
+                thumbBase.getWorldPosition(this.jointBase);
+                thumbTip.getWorldPosition(this.jointTip);
+                const thumbDir = new THREE.Vector3().subVectors(this.jointTip, this.jointBase).normalize();
 
-				// 3. Compute the angle between wrist axis and thumb
-				const dot = wristAxis.dot(thumbDir);
-				const angleRad = Math.acos(THREE.MathUtils.clamp(dot, -1, 1));
-				const angleDeg = THREE.MathUtils.radToDeg(angleRad);
+                const dot = wristAxis.dot(thumbDir);
+                const angleRad = Math.acos(THREE.MathUtils.clamp(dot, -1, 1));
+                const angleDeg = THREE.MathUtils.radToDeg(angleRad);
 
-				// 4. Must be pointing at a right angle (35° - 130°) away from the wrist axis
-				const isRightAngle = angleDeg >= 35 && angleDeg <= 130;
+                const isRightAngle = angleDeg >= 35 && angleDeg <= 130;
+                const thumbExtendedLength = this.jointTip.distanceTo(this.jointBase);
+                const isThumbStretched = thumbExtendedLength > 0.042;
 
-				// 5. Ensure the thumb itself is extended (not collapsed)
-				const thumbExtendedLength = this.jointTip.distanceTo(this.jointBase);
-				const isThumbStretched = thumbExtendedLength > 0.042; // > 4.2 cm
+                return isRightAngle && isThumbStretched;
+            }
+            
+            getHandThumbJoystick(hand, cam) {
+                if (!hand.joints) return null;
+                const thumbTip = hand.joints['thumb-tip'];
+                const thumbBase = hand.joints['thumb-metacarpal'] || hand.joints['thumb-phalanx-proximal'];
+                if (!thumbTip || !thumbBase) return null;
 
-				return isRightAngle && isThumbStretched;
-			}
-			
-			getHandThumbJoystick(hand, cam) {
-				if (!hand.joints) return null;
-				const thumbTip = hand.joints['thumb-tip'];
-				const thumbBase = hand.joints['thumb-metacarpal'] || hand.joints['thumb-phalanx-proximal'];
-				if (!thumbTip || !thumbBase) return null;
+                thumbTip.getWorldPosition(this.jointTip);
+                thumbBase.getWorldPosition(this.jointBase);
 
-				thumbTip.getWorldPosition(this.jointTip);
-				thumbBase.getWorldPosition(this.jointBase);
+                const thumbDir = new THREE.Vector3().subVectors(this.jointTip, this.jointBase).normalize();
 
-				// Direction vector of the thumb in world space
-				const thumbDir = new THREE.Vector3().subVectors(this.jointTip, this.jointBase).normalize();
+                const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+                const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
 
-				// Headset reference axes
-				const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
-				const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+                const dotUp = thumbDir.dot(camUp);
+                const dotRight = thumbDir.dot(camRight);
 
-				// Dot products give signed components (-1 to +1) relative to user's view
-				const dotUp = thumbDir.dot(camUp);
-				const dotRight = thumbDir.dot(camRight);
+                const deadzone = 0.28;
+                let yawInput = 0;
+                let pitchInput = 0;
 
-				const deadzone = 0.28;
-				let yawInput = 0;   // Up/Down
-				let pitchInput = 0; // Left/Right
+                if (Math.abs(dotUp) > deadzone) {
+                    yawInput = (dotUp - Math.sign(dotUp) * deadzone) / (1.0 - deadzone);
+                }
+                if (Math.abs(dotRight) > deadzone) {
+                    pitchInput = (dotRight - Math.sign(dotRight) * deadzone) / (1.0 - deadzone);
+                }
 
-				if (Math.abs(dotUp) > deadzone) {
-					yawInput = (dotUp - Math.sign(dotUp) * deadzone) / (1.0 - deadzone);
-				}
-				if (Math.abs(dotRight) > deadzone) {
-					pitchInput = (dotRight - Math.sign(dotRight) * deadzone) / (1.0 - deadzone);
-				}
+                if (yawInput === 0 && pitchInput === 0) return null;
 
-				if (yawInput === 0 && pitchInput === 0) return null;
-
-				return { yawInput, pitchInput };
-			}
-
+                return { yawInput, pitchInput };
+            }
 
             isHandMakingFist(hand) {
                 if (!hand.joints) return false;
@@ -1919,8 +1939,7 @@
                 const fingers = [
                     ['index-finger-tip', 'index-finger-phalanx-proximal'],
                     ['middle-finger-tip', 'middle-finger-phalanx-proximal'],
-                    ['ring-finger-tip', 'ring-finger-phalanx-proximal'],
-		    //['pinky-finger-tip', 'pinky-finger-phalanx-proximal']
+                    ['ring-finger-tip', 'ring-finger-phalanx-proximal']
                 ];
 
                 let curledFingers = 0;
@@ -1935,7 +1954,6 @@
                         }
                     }
                 }
-                // When 3 or more fingers curl tightly inward toward the palm, consider it a fist
                 return curledFingers >= 3;
             }
 
@@ -2027,7 +2045,7 @@
                 this.updatePalmMenuState();
 
                 /* -------------------------------------------------------------
-                   1. Dual-Thumbstick Controls
+                   1. Dual-Thumbstick Controls (Physical Gamepads)
                 ------------------------------------------------------------- */
                 let moveX = 0, moveY = 0;
                 let rotX = 0, rotY = 0;
@@ -2092,221 +2110,224 @@
                 let anyPalmHovered = false;
 
                 /* -------------------------------------------------------------
-                   2. Laser Raycasting (Controllers)
+                   2. Direct Finger Pokes, Hand Fist & Thumbs-Up Matrix Rotation
                 ------------------------------------------------------------- */
-                for (let controller of this.controllers) {
-		    const prevNode = controller.userData.hoveredNode;
-		    controller.userData.hoveredPalm = false;
-		    controller.userData.hoveredVRButton = null;
-		    controller.userData.hoveredNode = null;
+                for (let hand of this.hands) {
+                    if (hand.joints && hand.visible) {
+                        const indexTip = hand.joints['index-finger-tip'];
+                        let handIsInteracting = false;
 
-		    const laser = controller.getObjectByName('laser');
-		    const reticle = controller.userData?.reticle;
+                        if (indexTip) {
+                            const tipPos = this.tempVec.setFromMatrixPosition(indexTip.matrixWorld);
 
-		    // Check if corresponding hand (by handedness) or this controller is gripping/fist
-		    const handedness = controller.userData?.handedness;
-		    const matchingHand = this.hands.find(h => h.userData?.handedness === handedness);
-		    const isHandFist = matchingHand && matchingHand.userData?.isFist;
-		    const isGrabbed = controller.userData.isGripping || isHandFist;
+                            if (this.palmButtonMesh.visible && tipPos.distanceTo(this.palmButtonMesh.position) < 0.05) {
+                                this.openSpatialMenu();
+                                handIsInteracting = true;
+                                return;
+                            }
 
-		    // Hide laser & reticle when gripping or in fist
-		    if (isGrabbed) {
-		        if (laser) laser.visible = false;
-		        if (reticle) reticle.visible = false;
-		        continue; // Skip raycasting and node hover while gripping
-		    } else {
-		        if (laser) laser.visible = true;
-		    }
+                            for (let n of this.nodes) {
+                                const nWorld = n.mesh.getWorldPosition(this.tempNodePos);
+                                if (tipPos.distanceTo(nWorld) < NODE_RADIUS * 1.3) {
+                                    handIsInteracting = true;
+                                    currentlyHoveredNodeIds.add(n.id);
+                                    const isRightHand = hand.userData?.handedness === 'right';
 
-		    this.workingMatrix.identity().extractRotation(controller.matrixWorld);
-		    this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
-		    this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.workingMatrix);
+                                    if (isRightHand) {
+                                        if (!n.isRevealed && !n.isFlagged) {
+                                            this.revealNode(n.id);
+                                        }
+                                    } else {
+                                        if (!n.userDataPokeDebounce && !n.isRevealed) {
+                                            n.userDataPokeDebounce = true;
+                                            this.toggleFlag(n.id);
+                                            setTimeout(() => { n.userDataPokeDebounce = false; }, 400);
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
-		    if (reticle) reticle.visible = false;
+                        // Parse Hand Gestures
+                        const isFistNow = this.isHandMakingFist(hand);
+                        const isThumbsUp = isFistNow && this.isThumbAtRightAngleFromWrist(hand);
 
-		    if (this.palmButtonMesh.visible) {
-		        const palmHits = this.raycaster.intersectObject(this.palmButtonMesh, false);
-		        if (palmHits.length > 0) {
-		            controller.userData.hoveredPalm = true;
-		            anyPalmHovered = true;
-		            if (laser) laser.scale.z = palmHits[0].distance;
-		            if (reticle) {
-		                reticle.visible = true;
-		                reticle.position.copy(palmHits[0].point);
-		                reticle.quaternion.copy(this.palmButtonMesh.quaternion);
-		            }
-		            continue;
-		        }
-		    }
+                        hand.userData.isFist = isFistNow;
+                        hand.userData.isThumbRotating = isThumbsUp;
 
-		    if (this.hudMesh.visible) {
-		        const hudHits = this.raycaster.intersectObject(this.hudMesh, false);
-		        if (hudHits.length > 0) {
-		            const hit = hudHits[0];
-		            const uv = hit.uv;
-		            if (uv) {
-		                const canvasX = uv.x * 1024;
-		                const canvasY = (1 - uv.y) * 420;
+                        // State 2: Fist + Thumbs-Up -> Rotate Matrix Mode
+                        if (isThumbsUp) {
+                            if (this.activeGrabber === hand) {
+                                this.onXRGrabEnd(hand);
+                            }
 
-		                for (let btn of this.virtualButtons) {
-                		    if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
-		                        controller.userData.hoveredVRButton = btn;
-                		        break;
-		                    }
-		                }
-		            }
-		            if (laser) laser.scale.z = hit.distance;
+                            const joy = this.getHandThumbJoystick(hand, cam);
+                            if (joy) {
+                                const rotSpeed = 2.2;
+                                const yawAngle = -joy.yawInput * rotSpeed * dt;
+                                const pitchAngle = joy.pitchInput * rotSpeed * dt;
 
-		            if (reticle) {
-		                reticle.visible = true;
-		                reticle.position.copy(hit.point).addScaledVector(this.raycaster.ray.direction, -0.002);
-                		reticle.quaternion.copy(this.hudMesh.getWorldQuaternion(new THREE.Quaternion()));
-              		    }
-		            continue;
-		        }
-		    }
+                                const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
+                                const camRightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+                                camRightVec.y = 0;
+                                camRightVec.normalize();
+                                const qPitch = new THREE.Quaternion().setFromAxisAngle(camRightVec, pitchAngle);
 
-		    const hits = this.raycaster.intersectObjects(nodeMeshes, false);
-		    if (hits.length > 0) {
-		        const targetNode = this.nodes[hits[0].object.userData.nodeId];
-		        controller.userData.hoveredNode = targetNode;
-		        currentlyHoveredNodeIds.add(targetNode.id);
+                                const qTotal = new THREE.Quaternion().multiplyQuaternions(qPitch, qYaw);
+                                this.worldAnchor.quaternion.premultiply(qTotal);
+                                this.needsSpriteUpdate = true;
+                            }
 
-		        if (laser) laser.scale.z = hits[0].distance;
-		        if (reticle) {
-		            reticle.visible = true;
-		            reticle.position.copy(hits[0].point).addScaledVector(this.raycaster.ray.direction, -0.005);
-		            const headWorldPos = new THREE.Vector3();
-		            if (this.renderer.xr && this.renderer.xr.isPresenting) {
-		                const xrCam = this.renderer.xr.getCamera();
-		                headWorldPos.setFromMatrixPosition(xrCam.matrix);
-		                headWorldPos.applyMatrix4(this.cameraRig.matrixWorld);
-		            } else {
-		                this.camera.getWorldPosition(headWorldPos);
-		            }
-		            reticle.lookAt(headWorldPos);                        
-		        }
+                            // Show rotation gizmo floating above thumb tip, hide translation gizmo
+                            if (hand.userData.moveGizmo) hand.userData.moveGizmo.visible = false;
+                            if (hand.userData.rotGizmo) {
+                                hand.userData.rotGizmo.visible = true;
+                                const thumbTip = hand.joints['thumb-tip'];
+                                const thumbBase = hand.joints['thumb-metacarpal'] || hand.joints['thumb-phalanx-proximal'];
 
-		        if (prevNode !== targetNode) {
-		            this.triggerHaptic(controller, 0.2, 15);
-		        }
-		    } else {
-		        if (laser) laser.scale.z = 4.5;
-		    }
-		}
+                                if (thumbTip && thumbBase) {
+                                    thumbTip.getWorldPosition(this.jointTip);
+                                    thumbBase.getWorldPosition(this.jointBase);
+                                    const thumbDir = new THREE.Vector3().subVectors(this.jointTip, this.jointBase).normalize();
+
+                                    hand.userData.rotGizmo.position.copy(this.jointTip).addScaledVector(thumbDir, 0.035);
+                                    hand.userData.rotGizmo.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), thumbDir);
+                                }
+                            }
+                        } 
+                        // State 1: Fist (No Thumbs Up) -> Zero-G Grab Translation Mode
+                        else if (isFistNow) {
+                            if (this.activeGrabber !== hand && !handIsInteracting) {
+                                this.onXRGrabStart(hand);
+                            }
+
+                            if (hand.userData.rotGizmo) hand.userData.rotGizmo.visible = false;
+                            if (hand.userData.moveGizmo) {
+                                hand.userData.moveGizmo.visible = true;
+                                const refJoint = hand.joints['middle-finger-phalanx-proximal'] || hand.joints['wrist'];
+                                if (refJoint) {
+                                    refJoint.getWorldPosition(this.tempVec);
+                                    refJoint.getWorldQuaternion(this.tempQuat);
+                                    this.localDir.set(0, 0, -0.06).applyQuaternion(this.tempQuat);
+                                    hand.userData.moveGizmo.position.copy(this.tempVec).add(this.localDir);
+                                    hand.userData.moveGizmo.quaternion.copy(this.tempQuat);
+                                }
+                            }
+                        } 
+                        // State 3: Open Hand (All other cases) -> Idle/Pointer Mode
+                        else {
+                            if (this.activeGrabber === hand) {
+                                this.onXRGrabEnd(hand);
+                            }
+                            if (hand.userData.moveGizmo) hand.userData.moveGizmo.visible = false;
+                            if (hand.userData.rotGizmo) hand.userData.rotGizmo.visible = false;
+                        }
+                    }
+                }
 
                 /* -------------------------------------------------------------
-                   3. Direct Finger Pokes & Hand Grip (Fist) Tracking
+                   3. Laser Raycasting (Controllers & Open Hand Modes)
                 ------------------------------------------------------------- */
-				for (let hand of this.hands) {
-					if (hand.joints && hand.visible) {
-						const indexTip = hand.joints['index-finger-tip'];
-						let handIsInteracting = false;
+                for (let controller of this.controllers) {
+                    const prevNode = controller.userData.hoveredNode;
+                    controller.userData.hoveredPalm = false;
+                    controller.userData.hoveredVRButton = null;
+                    controller.userData.hoveredNode = null;
 
-						if (indexTip) {
-							const tipPos = this.tempVec.setFromMatrixPosition(indexTip.matrixWorld);
+                    const laser = controller.getObjectByName('laser');
+                    const reticle = controller.userData?.reticle;
 
-							if (this.palmButtonMesh.visible && tipPos.distanceTo(this.palmButtonMesh.position) < 0.05) {
-								this.openSpatialMenu();
-								handIsInteracting = true;
-								return;
-							}
+                    const handedness = controller.userData?.handedness;
+                    const matchingHand = this.hands.find(h => h.userData?.handedness === handedness);
+                    const isHandFist = matchingHand && matchingHand.userData?.isFist;
+                    const isHandRotating = matchingHand && matchingHand.userData?.isThumbRotating;
+                    const isGrabbed = controller.userData.isGripping || isHandFist || isHandRotating;
 
-							for (let n of this.nodes) {
-								const nWorld = n.mesh.getWorldPosition(this.tempNodePos);
-								if (tipPos.distanceTo(nWorld) < NODE_RADIUS * 1.3) {
-									handIsInteracting = true;
-									currentlyHoveredNodeIds.add(n.id);
-									const isRightHand = hand.userData?.handedness === 'right';
+                    // Hide laser & reticle in Fist / Thumbs-up modes; show in all other cases
+                    if (isGrabbed) {
+                        if (laser) laser.visible = false;
+                        if (reticle) reticle.visible = false;
+                        continue;
+                    } else {
+                        if (laser) laser.visible = true;
+                    }
 
-									if (isRightHand) {
-										if (!n.isRevealed && !n.isFlagged) {
-											this.revealNode(n.id);
-										}
-									} else {
-										if (!n.userDataPokeDebounce && !n.isRevealed) {
-											n.userDataPokeDebounce = true;
-											this.toggleFlag(n.id);
-											setTimeout(() => { n.userDataPokeDebounce = false; }, 400);
-										}
-									}
-								}
-							}
-						}
+                    this.workingMatrix.identity().extractRotation(controller.matrixWorld);
+                    this.raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+                    this.raycaster.ray.direction.set(0, 0, -1).applyMatrix4(this.workingMatrix);
 
-						// 1. Check Hand Fist (index, middle, ring curled)
-						const isFistNow = this.isHandMakingFist(hand);
+                    if (reticle) reticle.visible = false;
 
-						// 2. Only trigger rotation when the thumb sticks out at a right angle from the wrist
-						const isThumbStickingOut = isFistNow && this.isThumbAtRightAngleFromWrist(hand);
+                    if (this.palmButtonMesh.visible) {
+                        const palmHits = this.raycaster.intersectObject(this.palmButtonMesh, false);
+                        if (palmHits.length > 0) {
+                            controller.userData.hoveredPalm = true;
+                            anyPalmHovered = true;
+                            if (laser) laser.scale.z = palmHits[0].distance;
+                            if (reticle) {
+                                reticle.visible = true;
+                                reticle.position.copy(palmHits[0].point);
+                                reticle.quaternion.copy(this.palmButtonMesh.quaternion);
+                            }
+                            continue;
+                        }
+                    }
 
-						if (isThumbStickingOut) {
-							// When using thumb-joystick rotation, suspend zero-G grab translation
-							if (this.activeGrabber === hand) {
-								this.onXRGrabEnd(hand);
-							}
+                    if (this.hudMesh.visible) {
+                        const hudHits = this.raycaster.intersectObject(this.hudMesh, false);
+                        if (hudHits.length > 0) {
+                            const hit = hudHits[0];
+                            const uv = hit.uv;
+                            if (uv) {
+                                const canvasX = uv.x * 1024;
+                                const canvasY = (1 - uv.y) * 420;
 
-							const joy = this.getHandThumbJoystick(hand, cam);
-							if (joy) {
-								const rotSpeed = 2.2;
+                                for (let btn of this.virtualButtons) {
+                                    if (canvasX >= btn.x && canvasX <= btn.x + btn.w && canvasY >= btn.y && canvasY <= btn.y + btn.h) {
+                                        controller.userData.hoveredVRButton = btn;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (laser) laser.scale.z = hit.distance;
 
-								// Yaw:
-								// Thumb points UP (yawInput > 0)    -> Yaw Clockwise
-								// Thumb points DOWN (yawInput < 0)  -> Yaw Counter-Clockwise
-								const yawAngle = -joy.yawInput * rotSpeed * dt;
+                            if (reticle) {
+                                reticle.visible = true;
+                                reticle.position.copy(hit.point).addScaledVector(this.raycaster.ray.direction, -0.002);
+                                reticle.quaternion.copy(this.hudMesh.getWorldQuaternion(new THREE.Quaternion()));
+                            }
+                            continue;
+                        }
+                    }
 
-								// Pitch:
-								// Thumb points LEFT (pitchInput < 0)  -> Pitch Clockwise
-								// Thumb points RIGHT (pitchInput > 0) -> Pitch Counter-Clockwise
-								const pitchAngle = joy.pitchInput * rotSpeed * dt;
+                    const hits = this.raycaster.intersectObjects(nodeMeshes, false);
+                    if (hits.length > 0) {
+                        const targetNode = this.nodes[hits[0].object.userData.nodeId];
+                        controller.userData.hoveredNode = targetNode;
+                        currentlyHoveredNodeIds.add(targetNode.id);
 
-								const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
+                        if (laser) laser.scale.z = hits[0].distance;
+                        if (reticle) {
+                            reticle.visible = true;
+                            reticle.position.copy(hits[0].point).addScaledVector(this.raycaster.ray.direction, -0.005);
+                            const headWorldPos = new THREE.Vector3();
+                            if (this.renderer.xr && this.renderer.xr.isPresenting) {
+                                const xrCam = this.renderer.xr.getCamera();
+                                headWorldPos.setFromMatrixPosition(xrCam.matrix);
+                                headWorldPos.applyMatrix4(this.cameraRig.matrixWorld);
+                            } else {
+                                this.camera.getWorldPosition(headWorldPos);
+                            }
+                            reticle.lookAt(headWorldPos);                        
+                        }
 
-								const camRightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
-								camRightVec.y = 0;
-								camRightVec.normalize();
-								const qPitch = new THREE.Quaternion().setFromAxisAngle(camRightVec, pitchAngle);
-
-								const qTotal = new THREE.Quaternion().multiplyQuaternions(qPitch, qYaw);
-								this.worldAnchor.quaternion.premultiply(qTotal);
-								this.needsSpriteUpdate = true;
-							}
-						} else {
-							// Normal Zero-G locomotion when making a regular fist without the 90° thumb
-							if (isFistNow !== hand.userData.isFist) {
-								hand.userData.isFist = isFistNow;
-								if (isFistNow) {
-									if (!handIsInteracting) {
-										this.onXRGrabStart(hand);
-									}
-								} else {
-									if (this.activeGrabber === hand) {
-										this.onXRGrabEnd(hand);
-									}
-								}
-							}
-						}
-
-						// Position and update the 3D move arrows for the hand
-						if (hand.userData.moveGizmo) {
-							if (isFistNow && hand.visible) {
-								hand.userData.moveGizmo.visible = true;
-								const refJoint = hand.joints['middle-finger-phalanx-proximal'] || hand.joints['wrist'];
-								if (refJoint) {
-									refJoint.getWorldPosition(this.tempVec);
-									refJoint.getWorldQuaternion(this.tempQuat);
-									
-									// Float 6 cm in front of the knuckle/fist
-									this.localDir.set(0, 0, -0.06).applyQuaternion(this.tempQuat);
-									hand.userData.moveGizmo.position.copy(this.tempVec).add(this.localDir);
-									hand.userData.moveGizmo.quaternion.copy(this.tempQuat);
-								}
-							} else {
-								hand.userData.moveGizmo.visible = false;
-							}
-						}
-					}
-				}
+                        if (prevNode !== targetNode) {
+                            this.triggerHaptic(controller, 0.2, 15);
+                        }
+                    } else {
+                        if (laser) laser.scale.z = 4.5;
+                    }
+                }
 
                 for (let n of this.nodes) {
                     if (currentlyHoveredNodeIds.has(n.id)) {
