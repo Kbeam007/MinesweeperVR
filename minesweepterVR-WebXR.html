@@ -1755,7 +1755,7 @@
                     ['index-finger-tip', 'index-finger-phalanx-proximal'],
                     ['middle-finger-tip', 'middle-finger-phalanx-proximal'],
                     ['ring-finger-tip', 'ring-finger-phalanx-proximal'],
-                    ['pinky-finger-tip', 'pinky-finger-phalanx-proximal']
+		    //['pinky-finger-tip', 'pinky-finger-phalanx-proximal']
                 ];
 
                 let curledFingers = 0;
@@ -1765,7 +1765,7 @@
                     if (tip && base) {
                         tip.getWorldPosition(this.jointTip);
                         base.getWorldPosition(this.jointBase);
-                        if (this.jointTip.distanceTo(this.jointBase) < 0.062) {
+                        if (this.jointTip.distanceTo(this.jointBase) < 0.04) {
                             curledFingers++;
                         }
                     }
