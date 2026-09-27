@@ -1877,7 +1877,7 @@
 
 				if (!wrist || !middleKnuckle || !thumbBase || !thumbTip) return false;
 
-				// 1. Vector pointing straight along the hand from the wrist to the middle knuckle
+				// 1. Vector pointing along the hand/wrist axis
 				wrist.getWorldPosition(this.jointBase);
 				middleKnuckle.getWorldPosition(this.tempVec);
 				const wristAxis = new THREE.Vector3().subVectors(this.tempVec, this.jointBase).normalize();
@@ -1887,17 +1887,16 @@
 				thumbTip.getWorldPosition(this.jointTip);
 				const thumbDir = new THREE.Vector3().subVectors(this.jointTip, this.jointBase).normalize();
 
-				// 3. Compute the angle between wrist axis and thumb
+				// 3. Compute angle between the wrist axis and the thumb
 				const dot = wristAxis.dot(thumbDir);
 				const angleRad = Math.acos(THREE.MathUtils.clamp(dot, -1, 1));
 				const angleDeg = THREE.MathUtils.radToDeg(angleRad);
 
-				// 4. Must be pointing at a right angle (70° - 110°) away from the wrist axis
-				const isRightAngle = angleDeg >= 70 && angleDeg <= 110;
+				// 4. Strict right-angle window: exactly 80° to 100° (90° ± 10°)
+				const isRightAngle = angleDeg >= 80 && angleDeg <= 100;
 
-				// 5. Ensure the thumb itself is extended (not collapsed)
-				const thumbExtendedLength = this.jointTip.distanceTo(this.jointBase);
-				const isThumbStretched = thumbExtendedLength > 0.042; // > 4.2 cm
+				// 5. Thumb must be extended (> 4.2 cm)
+				const isThumbStretched = this.jointTip.distanceTo(this.jointBase) > 0.042;
 
 				return isRightAngle && isThumbStretched;
 			}
@@ -1922,7 +1921,7 @@
 				const dotUp = thumbDir.dot(camUp);
 				const dotRight = thumbDir.dot(camRight);
 
-				const deadzone = 0.28;
+				const deadzone = 0.18;
 				let yawInput = 0;   // Up/Down
 				let pitchInput = 0; // Left/Right
 
