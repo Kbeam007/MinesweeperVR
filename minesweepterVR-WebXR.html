@@ -1893,7 +1893,7 @@
 				const angleDeg = THREE.MathUtils.radToDeg(angleRad);
 
 				// 4. Strict right-angle window: exactly 80° to 100° (90° ± 10°)
-				const isRightAngle = angleDeg >= 80 && angleDeg <= 100;
+				const isRightAngle = angleDeg >= 70 && angleDeg <= 110;
 
 				// 5. Thumb must be extended (> 4.2 cm)
 				const isThumbStretched = this.jointTip.distanceTo(this.jointBase) > 0.042;
@@ -1910,20 +1910,21 @@
 				thumbTip.getWorldPosition(this.jointTip);
 				thumbBase.getWorldPosition(this.jointBase);
 
-				// Direction vector of the thumb in world space
 				const thumbDir = new THREE.Vector3().subVectors(this.jointTip, this.jointBase).normalize();
-
-				// Headset reference axes
 				const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
 				const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
 
-				// Dot products give signed components (-1 to +1) relative to user's view
 				const dotUp = thumbDir.dot(camUp);
 				const dotRight = thumbDir.dot(camRight);
 
-				const deadzone = 0.28;
-				let yawInput = 0;   // Up/Down
-				let pitchInput = 0; // Left/Right
+				// --- DEADZONE SETTINGS ---
+				// 0.20 = ~11.5° tilt required (more sensitive/hair-trigger)
+				// 0.28 = ~16.3° tilt required (default, balanced)
+				// 0.38 = ~22.3° tilt required (firm, very deliberate tilt needed)
+				const deadzone = 0.28; 
+
+				let yawInput = 0;
+				let pitchInput = 0;
 
 				if (Math.abs(dotUp) > deadzone) {
 					yawInput = (dotUp - Math.sign(dotUp) * deadzone) / (1.0 - deadzone);
