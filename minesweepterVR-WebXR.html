@@ -299,7 +299,7 @@
            • <b>Left Thumbstick:</b> Move forward, backward, and strafe side-to-side.<br>
            • <b>Right Thumbstick:</b> Rotate the whole matrix in place freely.<br>
            • <b>Zero-G Grip Pull:</b> Hold Grip in empty space and pull/push yourself forward, backward, up, or down. Release while moving to drift in weightless inertia. <b>Click Grip again anytime to brake & stop!</b><br>
-           • <b>Wrist Menu:</b> Flip your left palm upward anytime to summon the dashboard!
+           • <b>Wrist Menu:</b> Flip your left palm or twist your left controller upward to summon the dashboard!
         </p>
         <div class="modal-buttons">
             <button class="btn modal-close">Understood</button>
@@ -530,6 +530,12 @@
                 this.palmWorldPos = new THREE.Vector3();
                 this.controllerPalmDir = new THREE.Vector3();
 
+                // Debug State Telemetry
+                this.debugHandTracked = false;
+                this.debugPalmY = 0;
+                this.debugLeftPalmUp = false;
+                this.debugHudTimer = 0;
+
                 // Locomotion scratch vectors
                 this.camForward = new THREE.Vector3();
                 this.camRight = new THREE.Vector3();
@@ -591,6 +597,25 @@
                 this.controllerGrips = [];
                 this.hands = [];
                 this.raycaster = new THREE.Raycaster();
+
+                // Method A: 3D Direction Vector Arrow Helper for live gesture visualization
+                this.debugArrow = new THREE.ArrowHelper(
+                    new THREE.Vector3(0, 1, 0),
+                    new THREE.Vector3(0, 0, 0),
+                    0.15,
+                    0xffff00,
+                    0.035,
+                    0.02
+                );
+                this.debugArrow.visible = false;
+                this.debugArrow.renderOrder = 10001;
+                if (this.debugArrow.line && this.debugArrow.line.material) {
+                    this.debugArrow.line.material.depthTest = false;
+                }
+                if (this.debugArrow.cone && this.debugArrow.cone.material) {
+                    this.debugArrow.cone.material.depthTest = false;
+                }
+                this.scene.add(this.debugArrow);
 
                 for (let i = 0; i < 2; i++) {
                     const controller = this.renderer.xr.getController(i);
@@ -938,6 +963,15 @@
                     this.registerVJButton('close-page', 60, 210, 420, 120, 'INSPECT BOARD', false);
                     this.registerVJButton('new-game', 544, 210, 420, 120, 'PLAY AGAIN', true);
                 }
+
+                // Method B: Spatial HUD Telemetry Readout along bottom border
+                ctx.fillStyle = '#00ffea';
+                ctx.font = '15px monospace';
+                ctx.textAlign = 'left';
+                const trackedMode = this.debugHandTracked ? 'Hand Joints' : 'Controller Grip';
+                const valY = this.debugPalmY !== undefined ? this.debugPalmY.toFixed(2) : '0.00';
+                const status = this.debugLeftPalmUp ? 'TRIGGERED (UP)' : 'IDLE';
+                ctx.fillText(`[DEBUG] Mode: ${trackedMode} | PalmDir Y: ${valY} (Need > 0.55) | Status: ${status}`, 40, 404);
 
                 this.hudTexture.needsUpdate = true;
             }
@@ -1513,7 +1547,6 @@
                 this.orientSprite(node);
             }
 
-            // FIX: Transforms tracking-space XR Camera position into true cameraRig world coordinates
             orientSprite(node) {
                 if (!node.sprite || !node.sprite.visible) return;
 
@@ -1740,19 +1773,16 @@
             }
 
             updatePalmMenuState() {
-                if (this.isSpatialMenuOpen) {
-                    if (this.palmButtonMesh.visible) this.palmButtonMesh.visible = false;
-                    return;
-                }
-
                 let leftPalmUp = false;
                 let isLeftHandTracked = false;
                 let palmTargetPos = null;
 
-                const UPWARD_THRESHOLD = 0.68;
+                // Threshold corresponds to ~56 degrees from vertical
+                const UPWARD_THRESHOLD = 0.55;
 
+                // 1. Check Hand Tracking (Only if hand is actively visible and tracked)
                 for (let hand of this.hands) {
-                    if (hand.userData?.handedness === 'left' && hand.joints) {
+                    if (hand.visible && hand.userData?.handedness === 'left' && hand.joints) {
                         const wrist = hand.joints['wrist'];
                         const indexKnuckle = hand.joints['index-finger-phalanx-proximal'];
                         const pinkyKnuckle = hand.joints['pinky-finger-phalanx-proximal'];
@@ -1762,13 +1792,20 @@
                             indexKnuckle.getWorldPosition(this.palmP2);
                             pinkyKnuckle.getWorldPosition(this.palmP3);
 
-                            if (this.palmP1.lengthSq() > 0.001) {
+                            const v1 = this.tempVec.subVectors(this.palmP2, this.palmP1);
+                            const v2 = this.localDir.subVectors(this.palmP3, this.palmP1);
+
+                            if (v1.lengthSq() > 0.0001 && v2.lengthSq() > 0.0001) {
                                 isLeftHandTracked = true;
-
-                                const v1 = this.tempVec.subVectors(this.palmP2, this.palmP1);
-                                const v2 = this.localDir.subVectors(this.palmP3, this.palmP1);
-
                                 this.palmNormal.crossVectors(v2, v1).normalize();
+
+                                // Method A Visualizer update for Hands
+                                if (this.debugArrow) {
+                                    this.debugArrow.visible = true;
+                                    this.debugArrow.position.copy(this.palmP1);
+                                    this.debugArrow.setDirection(this.palmNormal);
+                                    this.debugArrow.setColor(this.palmNormal.y > UPWARD_THRESHOLD ? 0x00ff66 : 0xffff00);
+                                }
 
                                 if (this.palmNormal.y > UPWARD_THRESHOLD) {
                                     leftPalmUp = true;
@@ -1781,17 +1818,31 @@
                     }
                 }
 
-                if (!isLeftHandTracked && !leftPalmUp) {
-                    for (let controller of this.controllers) {
-                        if (controller.userData?.handedness === 'left' && controller.userData?.gamepad) {
-                            this.controllerPalmDir.set(0.95, 0.2, 0.2).normalize();
-                            const quat = controller.getWorldQuaternion(new THREE.Quaternion());
+                // 2. Controller Fallback (Using physical Grip space instead of Target Ray)
+                if (!isLeftHandTracked) {
+                    for (let i = 0; i < this.controllers.length; i++) {
+                        const controller = this.controllers[i];
+                        const grip = this.controllerGrips[i];
+
+                        if (controller.userData?.handedness === 'left') {
+                            // In Grip Space: +X is inner palm, +Y is faceplate/thumbstick
+                            // Blending (0.7, 0.7, 0.0) captures both palm-up and watch-glance gestures
+                            this.controllerPalmDir.set(0.7, 0.7, 0.0).normalize();
+                            const quat = grip.getWorldQuaternion(this.tempQuat);
                             this.controllerPalmDir.applyQuaternion(quat);
+
+                            // Method A Visualizer update for Controllers
+                            if (this.debugArrow) {
+                                this.debugArrow.visible = true;
+                                grip.getWorldPosition(this.debugArrow.position);
+                                this.debugArrow.setDirection(this.controllerPalmDir);
+                                this.debugArrow.setColor(this.controllerPalmDir.y > UPWARD_THRESHOLD ? 0x00ff66 : 0xffff00);
+                            }
 
                             if (this.controllerPalmDir.y > UPWARD_THRESHOLD) {
                                 leftPalmUp = true;
-                                this.palmWorldPos.setFromMatrixPosition(controller.matrixWorld);
-                                this.palmWorldPos.addScaledVector(this.controllerPalmDir, 0.10);
+                                grip.getWorldPosition(this.palmWorldPos);
+                                this.palmWorldPos.addScaledVector(this.controllerPalmDir, 0.12);
                                 palmTargetPos = this.palmWorldPos;
                                 break;
                             }
@@ -1799,13 +1850,32 @@
                     }
                 }
 
+                // Store state for Method B live HUD telemetry
+                this.debugHandTracked = isLeftHandTracked;
+                this.debugPalmY = isLeftHandTracked ? this.palmNormal.y : this.controllerPalmDir.y;
+                this.debugLeftPalmUp = leftPalmUp;
+
+                if (this.isSpatialMenuOpen) {
+                    if (this.palmButtonMesh && this.palmButtonMesh.visible) this.palmButtonMesh.visible = false;
+                    return;
+                }
+
                 if (leftPalmUp && palmTargetPos) {
                     this.palmButtonMesh.visible = true;
                     this.palmButtonMesh.position.copy(palmTargetPos);
-                    const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
-                    this.palmButtonMesh.lookAt(cam.position);
+
+                    // Orient button to face real-world headset position
+                    if (this.renderer.xr && this.renderer.xr.isPresenting) {
+                        this.cameraRig.updateMatrixWorld(true);
+                        const xrCam = this.renderer.xr.getCamera();
+                        this.tempVec.setFromMatrixPosition(xrCam.matrix);
+                        this.tempVec.applyMatrix4(this.cameraRig.matrixWorld);
+                    } else {
+                        this.camera.getWorldPosition(this.tempVec);
+                    }
+                    this.palmButtonMesh.lookAt(this.tempVec);
                 } else {
-                    this.palmButtonMesh.visible = false;
+                    if (this.palmButtonMesh) this.palmButtonMesh.visible = false;
                 }
             }
 
@@ -1863,7 +1933,6 @@
 
                     const moveSpeed = 2.2;
                     this.cameraRig.position.addScaledVector(this.moveVector, moveSpeed * dt);
-                    // FIX: Ensure billboard sprites reorient to head during thumbstick walking
                     this.needsSpriteUpdate = true;
                 }
 
@@ -2204,6 +2273,13 @@
 
                 if (this.renderer.xr.isPresenting) {
                     this.handleVRInteractions(dt);
+
+                    // Method B: Live refresh Spatial HUD telemetry while dashboard is open
+                    this.debugHudTimer += dt;
+                    if (this.isSpatialMenuOpen && this.debugHudTimer >= 0.1) {
+                        this.debugHudTimer = 0;
+                        this.renderSpatialUI();
+                    }
                 } else {
                     this.controls.update();
                     if (!this.inGame) {
