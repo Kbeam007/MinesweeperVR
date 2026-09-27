@@ -1841,41 +1841,27 @@
                 }
             }
 
-			isThumbAtRightAngleFromWrist(hand) {
+			isThumbExtendedAway(hand) {
 				if (!hand.joints) return false;
-
-				const wrist = hand.joints['wrist'];
-				const middleKnuckle = hand.joints['middle-finger-phalanx-proximal'];
-				const thumbBase = hand.joints['thumb-metacarpal'] || hand.joints['thumb-phalanx-proximal'];
 				const thumbTip = hand.joints['thumb-tip'];
+				const thumbBase = hand.joints['thumb-metacarpal'] || hand.joints['thumb-phalanx-proximal'];
+				const indexKnuckle = hand.joints['index-finger-phalanx-proximal'];
 
-				if (!wrist || !middleKnuckle || !thumbBase || !thumbTip) return false;
+				if (!thumbTip || !thumbBase || !indexKnuckle) return false;
 
-				// 1. Vector pointing straight along the hand from the wrist to the middle knuckle
-				wrist.getWorldPosition(this.jointBase);
-				middleKnuckle.getWorldPosition(this.tempVec);
-				const wristAxis = new THREE.Vector3().subVectors(this.tempVec, this.jointBase).normalize();
-
-				// 2. Vector pointing along the thumb from base to tip
-				thumbBase.getWorldPosition(this.jointBase);
 				thumbTip.getWorldPosition(this.jointTip);
-				const thumbDir = new THREE.Vector3().subVectors(this.jointTip, this.jointBase).normalize();
+				thumbBase.getWorldPosition(this.jointBase);
+				indexKnuckle.getWorldPosition(this.tempVec);
 
-				// 3. Compute the angle between wrist axis and thumb
-				const dot = wristAxis.dot(thumbDir);
-				const angleRad = Math.acos(THREE.MathUtils.clamp(dot, -1, 1));
-				const angleDeg = THREE.MathUtils.radToDeg(angleRad);
+				// Thumb is sticking out away from the fist if:
+				// 1. Tip is distanced from the curled index knuckle (> 5.5 cm)
+				// 2. Thumb itself is elongated from its base (> 4.5 cm)
+				const distToKnuckle = this.jointTip.distanceTo(this.tempVec);
+				const thumbLength = this.jointTip.distanceTo(this.jointBase);
 
-				// 4. Must be pointing at a right angle (70° - 110°) away from the wrist axis
-				const isRightAngle = angleDeg >= 45 && angleDeg <= 110;
-
-				// 5. Ensure the thumb itself is extended (not collapsed)
-				const thumbExtendedLength = this.jointTip.distanceTo(this.jointBase);
-				const isThumbStretched = thumbExtendedLength > 0.042; // > 4.2 cm
-
-				return isRightAngle && isThumbStretched;
+				return distToKnuckle > 0.055 && thumbLength > 0.045;
 			}
-			
+
 			getHandThumbJoystick(hand, cam) {
 				if (!hand.joints) return null;
 				const thumbTip = hand.joints['thumb-tip'];
@@ -1911,8 +1897,6 @@
 
 				return { yawInput, pitchInput };
 			}
-			
-			
 
 
             isHandMakingFist(hand) {
@@ -2236,14 +2220,14 @@
 							}
 						}
 
-						// 1. Check Hand Fist (index, middle, ring curled)
+						// 1. Check Hand Fist
 						const isFistNow = this.isHandMakingFist(hand);
 
-						// 2. Only trigger rotation when the thumb sticks out at a right angle from the wrist
-						const isThumbStickingOut = isFistNow && this.isThumbAtRightAngleFromWrist(hand);
+						// 2. Check if Thumb is sticking away like a joystick / thumbs-up
+						const isThumbStickingOut = isFistNow && this.isThumbExtendedAway(hand);
 
 						if (isThumbStickingOut) {
-							// When using thumb-joystick rotation, suspend zero-G grab translation
+							// When using thumb-joystick mode, suspend zero-G grab translation
 							if (this.activeGrabber === hand) {
 								this.onXRGrabEnd(hand);
 							}
@@ -2253,13 +2237,13 @@
 								const rotSpeed = 2.2;
 
 								// Yaw:
-								// Thumb points UP (yawInput > 0)    -> Yaw Clockwise
-								// Thumb points DOWN (yawInput < 0)  -> Yaw Counter-Clockwise
+								// Thumb points UP (yawInput > 0)    -> Yaw Clockwise (negative rotation around Y)
+								// Thumb points DOWN (yawInput < 0)  -> Yaw Counter-Clockwise (positive rotation around Y)
 								const yawAngle = -joy.yawInput * rotSpeed * dt;
 
 								// Pitch:
-								// Thumb points LEFT (pitchInput < 0)  -> Pitch Clockwise
-								// Thumb points RIGHT (pitchInput > 0) -> Pitch Counter-Clockwise
+								// Thumb points LEFT (pitchInput < 0)  -> Pitch Clockwise (negative rotation around camRight)
+								// Thumb points RIGHT (pitchInput > 0) -> Pitch Counter-Clockwise (positive rotation around camRight)
 								const pitchAngle = joy.pitchInput * rotSpeed * dt;
 
 								const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
@@ -2274,7 +2258,7 @@
 								this.needsSpriteUpdate = true;
 							}
 						} else {
-							// Normal Zero-G locomotion when making a regular fist without the 90° thumb
+							// Normal Fist / Zero-G locomotion when not using thumb rotation
 							if (isFistNow !== hand.userData.isFist) {
 								hand.userData.isFist = isFistNow;
 								if (isFistNow) {
