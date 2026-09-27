@@ -654,7 +654,9 @@
                         controller.userData.hoveredNode = null;
                         controller.userData.hoveredVRButton = null;
                         controller.userData.hoveredPalm = false;
-			controller.userData.isGripping = false;
+						controller.userData.isGripping = false;
+						if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = false;
+						if (hand.userData.moveGizmo) hand.userData.moveGizmo.visible = false;
                         if (this.activeGrabber === controller) {
                             this.onXRGrabEnd(controller);
                         }
@@ -667,61 +669,150 @@
                     });
                     hand.addEventListener('disconnected', () => {
                         hand.userData.handedness = null;
+						if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = false;
+						if (hand.userData.moveGizmo) hand.userData.moveGizmo.visible = false;
                         if (this.activeGrabber === hand) {
                             this.onXRGrabEnd(hand);
                         }
                     });
 
                     controller.addEventListener('selectstart', () => this.onXRTriggerDown(controller));
-		    controller.addEventListener('squeezestart', () => {controller.userData.isGripping = true;this.onXRGrabStart(controller);});
-		    controller.addEventListener('squeezeend', () => {controller.userData.isGripping = false;this.onXRGrabEnd(controller);});
+					controller.addEventListener('squeezestart', () => {
+						controller.userData.isGripping = true;
+						if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = true;
+						this.onXRGrabStart(controller);
+					});
+
+					controller.addEventListener('squeezeend', () => {
+						controller.userData.isGripping = false;
+						if (controller.userData.moveGizmo) controller.userData.moveGizmo.visible = false;
+						this.onXRGrabEnd(controller);
+					});
 
                     this.controllers.push(controller);
                     this.hands.push(hand);
                 }
             }
 
-            applyHandTheming(controller, grip, handedness) {
-                const isRight = handedness === 'right';
-                const colorHex = isRight ? COLORS.RIGHT_REVEAL : COLORS.LEFT_FLAG;
+	    createDoubleEndedGizmo(colorHex) {
+	        const group = new THREE.Group();
+	        const mat = new THREE.MeshBasicMaterial({
+	            color: colorHex,
+	            depthTest: false,
+	            depthWrite: false,
+	            transparent: true,
+	            opacity: 0.95
+	        });
 
-                const laser = controller.getObjectByName('laser');
-                if (laser) laser.material.color.setHex(colorHex);
+	        const totalLen = 0.08;
+	        const coneH = 0.015;
+	        const coneR = 0.0055;
+	        const shaftR = 0.0016;
+	        const shaftLen = totalLen - coneH * 2;
 
-                const reticle = controller.userData?.reticle;
-                if (reticle) reticle.material.color.setHex(colorHex);
+	        const createAxis = () => {
+	            const axisGroup = new THREE.Group();
+        
+	            // Central shaft
+	            const shaftGeo = new THREE.CylinderGeometry(shaftR, shaftR, shaftLen, 8);
+	            const shaft = new THREE.Mesh(shaftGeo, mat);
+	            shaft.renderOrder = 9999;
+	            axisGroup.add(shaft);
 
-                setTimeout(() => {
-                    grip.traverse((child) => {
-                        if (child.isMesh && child.material) {
-                            child.material = child.material.clone();
-                            child.material.color.setHex(colorHex);
-                            if ('emissive' in child.material) {
-                                child.material.emissive.setHex(colorHex);
-                                child.material.emissiveIntensity = 0.2;
-                            }
-                        }
-                    });
-                }, 300);
-            }
+	            // Positive pointy end
+	            const coneGeo = new THREE.ConeGeometry(coneR, coneH, 12);
+	            const topCone = new THREE.Mesh(coneGeo, mat);
+	            topCone.position.y = shaftLen / 2 + coneH / 2;
+	            topCone.renderOrder = 9999;
+	            axisGroup.add(topCone);
 
-            applyHandModelTheming(hand, handedness) {
-                const isRight = handedness === 'right';
-                const colorHex = isRight ? COLORS.RIGHT_REVEAL : COLORS.LEFT_FLAG;
+	            // Negative pointy end
+	            const bottomCone = new THREE.Mesh(coneGeo, mat);
+        	    bottomCone.position.y = -(shaftLen / 2 + coneH / 2);
+	            bottomCone.rotation.x = Math.PI;
+	            bottomCone.renderOrder = 9999;
+	            axisGroup.add(bottomCone);
 
-                setTimeout(() => {
-                    hand.traverse((child) => {
-                        if (child.isMesh && child.material) {
-                            child.material = child.material.clone();
-                            child.material.color.setHex(colorHex);
-                            if ('emissive' in child.material) {
-                                child.material.emissive.setHex(colorHex);
-                                child.material.emissiveIntensity = 0.3;
-                            }
-                        }
-                    });
-                }, 300);
-            }
+	            return axisGroup;
+	        };
+
+	        // Y-Axis (Vertical)
+	        const yAxis = createAxis();
+	        group.add(yAxis);
+
+	        // X-Axis (Horizontal) - perpendicular to Y
+	        const xAxis = createAxis();
+	        xAxis.rotation.z = Math.PI / 2;
+	        group.add(xAxis);
+
+	        // Z-Axis (Depth) - perpendicular to X and Y
+	        const zAxis = createAxis();
+	        zAxis.rotation.x = Math.PI / 2;
+	        group.add(zAxis);
+
+	        group.visible = false;
+	        group.renderOrder = 9999;
+	        return group;
+	    }
+
+			applyHandTheming(controller, grip, handedness) {
+				const isRight = handedness === 'right';
+				const colorHex = isRight ? COLORS.RIGHT_REVEAL : COLORS.LEFT_FLAG;
+
+				const laser = controller.getObjectByName('laser');
+				if (laser) laser.material.color.setHex(colorHex);
+
+				const reticle = controller.userData?.reticle;
+				if (reticle) reticle.material.color.setHex(colorHex);
+
+				// Create and attach the double-ended 3D move gizmo
+				if (controller.userData.moveGizmo) {
+					controller.remove(controller.userData.moveGizmo);
+				}
+				const gizmo = this.createDoubleEndedGizmo(colorHex);
+				gizmo.position.set(0, 0, -0.08); // Float in front of the controller
+				controller.add(gizmo);
+				controller.userData.moveGizmo = gizmo;
+
+				setTimeout(() => {
+					grip.traverse((child) => {
+						if (child.isMesh && child.material) {
+							child.material = child.material.clone();
+							child.material.color.setHex(colorHex);
+							if ('emissive' in child.material) {
+								child.material.emissive.setHex(colorHex);
+								child.material.emissiveIntensity = 0.2;
+							}
+						}
+					});
+				}, 300);
+			}
+
+			applyHandModelTheming(hand, handedness) {
+				const isRight = handedness === 'right';
+				const colorHex = isRight ? COLORS.RIGHT_REVEAL : COLORS.LEFT_FLAG;
+
+				// Create floating 3D move gizmo in scene for hand tracking
+				if (hand.userData.moveGizmo) {
+					this.scene.remove(hand.userData.moveGizmo);
+				}
+				const gizmo = this.createDoubleEndedGizmo(colorHex);
+				this.scene.add(gizmo);
+				hand.userData.moveGizmo = gizmo;
+
+				setTimeout(() => {
+					hand.traverse((child) => {
+						if (child.isMesh && child.material) {
+							child.material = child.material.clone();
+							child.material.color.setHex(colorHex);
+							if ('emissive' in child.material) {
+								child.material.emissive.setHex(colorHex);
+								child.material.emissiveIntensity = 0.3;
+							}
+						}
+					});
+				}, 300);
+			}
 
             /* -------------------------------------------------------------
                4. Spatial HUD & Wrist Menu
@@ -2071,20 +2162,39 @@
                             }
                         }
 
-                        // Check Hand Fist / Grip Gestures for Zero-G Locomotion
-                        const isFistNow = this.isHandMakingFist(hand);
-                        if (isFistNow !== hand.userData.isFist) {
-                            hand.userData.isFist = isFistNow;
-                            if (isFistNow) {
-                                if (!handIsInteracting) {
-                                    this.onXRGrabStart(hand);
-                                }
-                            } else {
-                                if (this.activeGrabber === hand) {
-                                    this.onXRGrabEnd(hand);
-                                }
-                            }
-                        }
+						// Check Hand Fist / Grip Gestures for Zero-G Locomotion
+						const isFistNow = this.isHandMakingFist(hand);
+						if (isFistNow !== hand.userData.isFist) {
+							hand.userData.isFist = isFistNow;
+							if (isFistNow) {
+								if (!handIsInteracting) {
+									this.onXRGrabStart(hand);
+								}
+							} else {
+								if (this.activeGrabber === hand) {
+									this.onXRGrabEnd(hand);
+								}
+							}
+						}
+
+						// Position and update the 3D move arrows for the hand
+						if (hand.userData.moveGizmo) {
+							if (hand.userData.isFist && hand.visible) {
+								hand.userData.moveGizmo.visible = true;
+								const refJoint = hand.joints['middle-finger-phalanx-proximal'] || hand.joints['wrist'];
+								if (refJoint) {
+									refJoint.getWorldPosition(this.tempVec);
+									refJoint.getWorldQuaternion(this.tempQuat);
+									
+									// Float 6 cm in front of the knuckle/fist
+									this.localDir.set(0, 0, -0.06).applyQuaternion(this.tempQuat);
+									hand.userData.moveGizmo.position.copy(this.tempVec).add(this.localDir);
+									hand.userData.moveGizmo.quaternion.copy(this.tempQuat);
+								}
+							} else {
+								hand.userData.moveGizmo.visible = false;
+							}
+						}
                     }
                 }
 
