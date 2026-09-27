@@ -1866,8 +1866,8 @@
 				const angleRad = Math.acos(THREE.MathUtils.clamp(dot, -1, 1));
 				const angleDeg = THREE.MathUtils.radToDeg(angleRad);
 
-				// 4. Must be pointing at a right angle (30° - 110°) away from the wrist axis
-				const isRightAngle = angleDeg >= 30 && angleDeg <= 110;
+				// 4. Must be pointing at a right angle (40° - 130°) away from the wrist axis
+				const isRightAngle = angleDeg >= 40 && angleDeg <= 130;
 
 				// 5. Ensure the thumb itself is extended (not collapsed)
 				const thumbExtendedLength = this.jointTip.distanceTo(this.jointBase);
