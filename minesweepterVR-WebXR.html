@@ -1866,6 +1866,63 @@
                 // When 3 or more fingers curl tightly inward toward the palm, consider it a fist
                 return curledFingers >= 3;
             }
+			
+			isThumbExtendedAway(hand) {
+				if (!hand.joints) return false;
+				const thumbTip = hand.joints['thumb-tip'];
+				const thumbBase = hand.joints['thumb-metacarpal'] || hand.joints['thumb-phalanx-proximal'];
+				const indexKnuckle = hand.joints['index-finger-phalanx-proximal'];
+
+				if (!thumbTip || !thumbBase || !indexKnuckle) return false;
+
+				thumbTip.getWorldPosition(this.jointTip);
+				thumbBase.getWorldPosition(this.jointBase);
+				indexKnuckle.getWorldPosition(this.tempVec);
+
+				// Thumb is sticking out away from the fist if:
+				// 1. Tip is distanced from the curled index knuckle (> 5.5 cm)
+				// 2. Thumb itself is elongated from its base (> 4.5 cm)
+				const distToKnuckle = this.jointTip.distanceTo(this.tempVec);
+				const thumbLength = this.jointTip.distanceTo(this.jointBase);
+
+				return distToKnuckle > 0.055 && thumbLength > 0.045;
+			}
+
+			getHandThumbJoystick(hand, cam) {
+				if (!hand.joints) return null;
+				const thumbTip = hand.joints['thumb-tip'];
+				const thumbBase = hand.joints['thumb-metacarpal'] || hand.joints['thumb-phalanx-proximal'];
+				if (!thumbTip || !thumbBase) return null;
+
+				thumbTip.getWorldPosition(this.jointTip);
+				thumbBase.getWorldPosition(this.jointBase);
+
+				// Direction vector of the thumb in world space
+				const thumbDir = new THREE.Vector3().subVectors(this.jointTip, this.jointBase).normalize();
+
+				// Headset reference axes
+				const camUp = new THREE.Vector3(0, 1, 0).applyQuaternion(cam.quaternion);
+				const camRight = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+
+				// Dot products give signed components (-1 to +1) relative to user's view
+				const dotUp = thumbDir.dot(camUp);
+				const dotRight = thumbDir.dot(camRight);
+
+				const deadzone = 0.28;
+				let yawInput = 0;   // Up/Down
+				let pitchInput = 0; // Left/Right
+
+				if (Math.abs(dotUp) > deadzone) {
+					yawInput = (dotUp - Math.sign(dotUp) * deadzone) / (1.0 - deadzone);
+				}
+				if (Math.abs(dotRight) > deadzone) {
+					pitchInput = (dotRight - Math.sign(dotRight) * deadzone) / (1.0 - deadzone);
+				}
+
+				if (yawInput === 0 && pitchInput === 0) return null;
+
+				return { yawInput, pitchInput };
+			}
 
             updatePalmMenuState() {
                 let leftPalmUp = false;
@@ -2126,60 +2183,98 @@
                 /* -------------------------------------------------------------
                    3. Direct Finger Pokes & Hand Grip (Fist) Tracking
                 ------------------------------------------------------------- */
-                for (let hand of this.hands) {
-                    if (hand.joints && hand.visible) {
-                        const indexTip = hand.joints['index-finger-tip'];
-                        let handIsInteracting = false;
+				for (let hand of this.hands) {
+					if (hand.joints && hand.visible) {
+						const indexTip = hand.joints['index-finger-tip'];
+						let handIsInteracting = false;
 
-                        if (indexTip) {
-                            const tipPos = this.tempVec.setFromMatrixPosition(indexTip.matrixWorld);
+						if (indexTip) {
+							const tipPos = this.tempVec.setFromMatrixPosition(indexTip.matrixWorld);
 
-                            if (this.palmButtonMesh.visible && tipPos.distanceTo(this.palmButtonMesh.position) < 0.05) {
-                                this.openSpatialMenu();
-                                handIsInteracting = true;
-                                return;
-                            }
+							if (this.palmButtonMesh.visible && tipPos.distanceTo(this.palmButtonMesh.position) < 0.05) {
+								this.openSpatialMenu();
+								handIsInteracting = true;
+								return;
+							}
 
-                            for (let n of this.nodes) {
-                                const nWorld = n.mesh.getWorldPosition(this.tempNodePos);
-                                if (tipPos.distanceTo(nWorld) < NODE_RADIUS * 1.3) {
-                                    handIsInteracting = true;
-                                    currentlyHoveredNodeIds.add(n.id);
-                                    const isRightHand = hand.userData?.handedness === 'right';
+							for (let n of this.nodes) {
+								const nWorld = n.mesh.getWorldPosition(this.tempNodePos);
+								if (tipPos.distanceTo(nWorld) < NODE_RADIUS * 1.3) {
+									handIsInteracting = true;
+									currentlyHoveredNodeIds.add(n.id);
+									const isRightHand = hand.userData?.handedness === 'right';
 
-                                    if (isRightHand) {
-                                        if (!n.isRevealed && !n.isFlagged) {
-                                            this.revealNode(n.id);
-                                        }
-                                    } else {
-                                        if (!n.userDataPokeDebounce && !n.isRevealed) {
-                                            n.userDataPokeDebounce = true;
-                                            this.toggleFlag(n.id);
-                                            setTimeout(() => { n.userDataPokeDebounce = false; }, 400);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-						// Check Hand Fist / Grip Gestures for Zero-G Locomotion
-						const isFistNow = this.isHandMakingFist(hand);
-						if (isFistNow !== hand.userData.isFist) {
-							hand.userData.isFist = isFistNow;
-							if (isFistNow) {
-								if (!handIsInteracting) {
-									this.onXRGrabStart(hand);
+									if (isRightHand) {
+										if (!n.isRevealed && !n.isFlagged) {
+											this.revealNode(n.id);
+										}
+									} else {
+										if (!n.userDataPokeDebounce && !n.isRevealed) {
+											n.userDataPokeDebounce = true;
+											this.toggleFlag(n.id);
+											setTimeout(() => { n.userDataPokeDebounce = false; }, 400);
+										}
+									}
 								}
-							} else {
-								if (this.activeGrabber === hand) {
-									this.onXRGrabEnd(hand);
+							}
+						}
+
+						// 1. Check Hand Fist
+						const isFistNow = this.isHandMakingFist(hand);
+
+						// 2. Check if Thumb is sticking away like a joystick / thumbs-up
+						const isThumbStickingOut = isFistNow && this.isThumbExtendedAway(hand);
+
+						if (isThumbStickingOut) {
+							// When using thumb-joystick mode, suspend zero-G grab translation
+							if (this.activeGrabber === hand) {
+								this.onXRGrabEnd(hand);
+							}
+
+							const joy = this.getHandThumbJoystick(hand, cam);
+							if (joy) {
+								const rotSpeed = 2.2;
+
+								// Yaw:
+								// Thumb points UP (yawInput > 0)    -> Yaw Clockwise (negative rotation around Y)
+								// Thumb points DOWN (yawInput < 0)  -> Yaw Counter-Clockwise (positive rotation around Y)
+								const yawAngle = -joy.yawInput * rotSpeed * dt;
+
+								// Pitch:
+								// Thumb points LEFT (pitchInput < 0)  -> Pitch Clockwise (negative rotation around camRight)
+								// Thumb points RIGHT (pitchInput > 0) -> Pitch Counter-Clockwise (positive rotation around camRight)
+								const pitchAngle = joy.pitchInput * rotSpeed * dt;
+
+								const qYaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yawAngle);
+
+								const camRightVec = new THREE.Vector3(1, 0, 0).applyQuaternion(cam.quaternion);
+								camRightVec.y = 0;
+								camRightVec.normalize();
+								const qPitch = new THREE.Quaternion().setFromAxisAngle(camRightVec, pitchAngle);
+
+								const qTotal = new THREE.Quaternion().multiplyQuaternions(qPitch, qYaw);
+								this.worldAnchor.quaternion.premultiply(qTotal);
+								this.needsSpriteUpdate = true;
+							}
+						} else {
+							// Normal Fist / Zero-G locomotion when not using thumb rotation
+							if (isFistNow !== hand.userData.isFist) {
+								hand.userData.isFist = isFistNow;
+								if (isFistNow) {
+									if (!handIsInteracting) {
+										this.onXRGrabStart(hand);
+									}
+								} else {
+									if (this.activeGrabber === hand) {
+										this.onXRGrabEnd(hand);
+									}
 								}
 							}
 						}
 
 						// Position and update the 3D move arrows for the hand
 						if (hand.userData.moveGizmo) {
-							if (hand.userData.isFist && hand.visible) {
+							if (isFistNow && hand.visible) {
 								hand.userData.moveGizmo.visible = true;
 								const refJoint = hand.joints['middle-finger-phalanx-proximal'] || hand.joints['wrist'];
 								if (refJoint) {
@@ -2195,8 +2290,8 @@
 								hand.userData.moveGizmo.visible = false;
 							}
 						}
-                    }
-                }
+					}
+				}
 
                 for (let n of this.nodes) {
                     if (currentlyHoveredNodeIds.has(n.id)) {
