@@ -1866,20 +1866,22 @@
 
                 // Left Stick Smooth Locomotion
                 if (Math.abs(moveX) > 0.05 || Math.abs(moveY) > 0.05) {
-                    cam.getWorldDirection(this.camForward);
-                    this.camForward.y = 0;
-                    this.camForward.normalize();
+			// 1. Get true 3D looking direction (including pitch up/down)
+			cam.getWorldDirection(this.camForward);
+			this.camForward.normalize();
 
-                    this.camRight.crossVectors(this.camForward, new THREE.Vector3(0, 1, 0)).normalize();
+			// 2. Derive sideways strafe vector relative to the camera's actual tilt
+			this.camRight.set(1, 0, 0).applyQuaternion(cam.quaternion).normalize();
 
-                    this.moveVector.set(0, 0, 0);
-                    this.moveVector.addScaledVector(this.camForward, -moveY);
-                    this.moveVector.addScaledVector(this.camRight, moveX);
+			// 3. Calculate movement vector
+			this.moveVector.set(0, 0, 0);
+			this.moveVector.addScaledVector(this.camForward, -moveY);
+			this.moveVector.addScaledVector(this.camRight, moveX);
 
-                    const moveSpeed = 2.2;
-                    this.cameraRig.position.addScaledVector(this.moveVector, moveSpeed * dt);
-                    this.needsSpriteUpdate = true;
-                }
+			const moveSpeed = 2.2;
+			this.cameraRig.position.addScaledVector(this.moveVector, moveSpeed * dt);
+			this.needsSpriteUpdate = true;
+		}
 
                 // Right Stick Matrix Rotation
                 if (Math.abs(rotX) > 0.05 || Math.abs(rotY) > 0.05) {
