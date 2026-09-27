@@ -739,7 +739,6 @@
                 this.hudMesh = new THREE.Mesh(hudGeo, hudMat);
                 this.hudMesh.renderOrder = 9999;
                 
-                // Parented directly to cameraRig so thumbstick/grip movement moves the HUD in lockstep
                 this.cameraRig.add(this.hudMesh);
 
                 this.virtualButtons = [];
@@ -946,7 +945,6 @@
             getHeadPoseInRig(outPos, outQuat, outDir) {
                 if (this.renderer.xr && this.renderer.xr.isPresenting) {
                     const xrCam = this.renderer.xr.getCamera();
-                    // xrCam.matrix stores the head's local tracking pose relative to cameraRig
                     xrCam.matrix.decompose(outPos, outQuat, this.tempVec);
                     if (outDir) {
                         outDir.set(0, 0, -1).applyQuaternion(outQuat);
@@ -969,7 +967,6 @@
 
                 this.getHeadPoseInRig(headPos, headQuat, headDir);
 
-                // Position the dashboard 0.85m in front of the player's view in cameraRig space
                 const targetPos = headPos.clone().addScaledVector(headDir, 0.85);
 
                 if (snap) {
@@ -978,8 +975,6 @@
                     return;
                 }
 
-                // As hudMesh is a child of cameraRig, thumbstick and grip locomotion move it instantly.
-                // This smooth slerp/lerp recenters it gracefully when you look around.
                 this.hudMesh.position.lerp(targetPos, 0.14);
                 this.hudMesh.quaternion.slerp(headQuat, 0.14);
             }
@@ -1019,7 +1014,6 @@
                 this.hudMesh.visible = true;
                 if (this.palmButtonMesh) this.palmButtonMesh.visible = false;
                 
-                // Snap directly in front of the user's current view
                 this.updateSpatialHUDPosition(true);
 
                 this.updateControllerVisualHierarchy();
@@ -1346,7 +1340,6 @@
                 this.playerLinearVelocity.set(0, 0, 0);
                 this.isPlayerDrifting = false;
 
-                // Reset camera rig position for clean origin
                 this.cameraRig.position.set(0, 0, 0);
 
                 const box = new THREE.Box3();
@@ -1520,10 +1513,18 @@
                 this.orientSprite(node);
             }
 
+            // FIX: Transforms tracking-space XR Camera position into true cameraRig world coordinates
             orientSprite(node) {
                 if (!node.sprite || !node.sprite.visible) return;
-                const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
-                cam.getWorldPosition(this.camPos);
+
+                if (this.renderer.xr && this.renderer.xr.isPresenting) {
+                    this.cameraRig.updateMatrixWorld(true);
+                    const xrCam = this.renderer.xr.getCamera();
+                    this.camPos.setFromMatrixPosition(xrCam.matrix);
+                    this.camPos.applyMatrix4(this.cameraRig.matrixWorld);
+                } else {
+                    this.camera.getWorldPosition(this.camPos);
+                }
 
                 this.localDir.copy(this.camPos);
                 node.mesh.worldToLocal(this.localDir);
@@ -1714,7 +1715,6 @@
             }
 
             onXRGripStart(controller) {
-                // Instantly brake and freeze any player inertia drift
                 this.playerLinearVelocity.set(0, 0, 0);
                 this.isPlayerDrifting = false;
 
@@ -1728,7 +1728,6 @@
                 this.grabbedBy = this.grabbedBy.filter(c => c !== controller);
                 
                 if (this.grabbedBy.length === 0) {
-                    // Activate weightless linear player inertia if moving with intent
                     if (this.playerLinearVelocity.length() > 0.02) {
                         this.isPlayerDrifting = true;
                     } else {
@@ -1804,9 +1803,7 @@
                     this.palmButtonMesh.visible = true;
                     this.palmButtonMesh.position.copy(palmTargetPos);
                     const cam = (this.renderer.xr && this.renderer.xr.isPresenting) ? this.renderer.xr.getCamera() : this.camera;
-                    // Use world coordinates:
-		    cam.getWorldPosition(this.tempVec);
-		    this.palmButtonMesh.lookAt(this.tempVec);
+                    this.palmButtonMesh.lookAt(cam.position);
                 } else {
                     this.palmButtonMesh.visible = false;
                 }
@@ -1866,6 +1863,8 @@
 
                     const moveSpeed = 2.2;
                     this.cameraRig.position.addScaledVector(this.moveVector, moveSpeed * dt);
+                    // FIX: Ensure billboard sprites reorient to head during thumbstick walking
+                    this.needsSpriteUpdate = true;
                 }
 
                 // Right Stick Matrix Rotation
@@ -2213,7 +2212,6 @@
                     }
                 }
 
-                // Process HUD update after locomotion so it moves synchronously without a 1-frame lag
                 this.updateSpatialHUDPosition();
 
                 this.spriteUpdateTimer += dt;
